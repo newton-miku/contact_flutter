@@ -1,0 +1,51 @@
+# 本文件是 Flutter 官方模板的 .gitignore。
+# 生成 APK 等产物见 /build、.dart_tool 等；均不入库。
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code（launch 配置等一般建议入库，故默认不忽略）
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio / signing
+/android/app/debug
+/android/app/profile
+/android/app/release
+# 本机 SDK/Flutter 路径，机器相关不入库
+/android/local.properties
+# 签名密钥（将来生成 key.properties / jks 时不要入库）
+/android/key.properties
+*.jks
+*.keystore
