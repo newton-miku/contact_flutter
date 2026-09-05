@@ -5,13 +5,16 @@ import '../../data/models/contact.dart';
 class GroupHeader extends StatelessWidget {
   final String groupKey;
   final List<SelectableContact> contacts;
-  final VoidCallback onToggle;
+  /// 是否处于导出模式（可勾选）。浏览态下仅展示组名与人数，点击不产生任何选择动作。
+  final bool selectMode;
+  final VoidCallback? onToggle;
 
   const GroupHeader({
     super.key,
     required this.groupKey,
     required this.contacts,
-    required this.onToggle,
+    this.selectMode = false,
+    this.onToggle,
   });
 
   @override
@@ -29,7 +32,8 @@ class GroupHeader extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: onToggle,
+          // 仅导出模式下点击 = 整组勾选/取消，浏览态不响应。
+          onTap: selectMode ? onToggle : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
@@ -60,7 +64,9 @@ class GroupHeader extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '$selectedCount/${contacts.length} 已选',
+                        selectMode
+                            ? '$selectedCount/${contacts.length} 已选'
+                            : '${contacts.length} 人',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: colorScheme.onPrimaryContainer.withValues(alpha: 0.7),
                         ),
@@ -68,25 +74,27 @@ class GroupHeader extends StatelessWidget {
                     ],
                   ),
                 ),
-                // 勾选指示器
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: allSelected
-                        ? colorScheme.primary
+                // 导出模式下的勾选指示器（浏览态不显示）
+                if (selectMode) ...[
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: allSelected
+                          ? colorScheme.primary
+                          : someSelected
+                              ? colorScheme.tertiary
+                              : colorScheme.onPrimaryContainer.withValues(alpha: 0.08),
+                    ),
+                    child: allSelected
+                        ? Icon(Icons.check, size: 16, color: colorScheme.onPrimary)
                         : someSelected
-                        ? colorScheme.tertiary
-                        : colorScheme.onPrimaryContainer.withValues(alpha: 0.08),
+                            ? Icon(Icons.remove, size: 16, color: colorScheme.onPrimary)
+                            : null,
                   ),
-                  child: allSelected
-                      ? Icon(Icons.check, size: 16, color: colorScheme.onPrimary)
-                      : someSelected
-                      ? Icon(Icons.remove, size: 16, color: colorScheme.onPrimary)
-                      : null,
-                ),
-                const SizedBox(width: 4),
+                  const SizedBox(width: 4),
+                ],
               ],
             ),
           ),

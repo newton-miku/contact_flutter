@@ -34,7 +34,7 @@
 
     <application
         android:label="通讯录"
-        android:name="${applicationName}"
+        android:name=".PhonebookApp"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"><!-- 开发期允许 http 访问后端；上线改 https 后请移除 -->
         <activity

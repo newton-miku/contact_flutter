@@ -5,6 +5,7 @@ import android.content.ContentProviderOperation
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.ContactsContract
+import android.telephony.TelephonyManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -78,6 +79,21 @@ class MainActivity : FlutterActivity() {
                     CallerId.openFullScreenSettings(this)
                     result.success(true)
                 }
+                "status" -> result.success(CallerId.status(this))
+                "simulateIncoming" -> {
+                    val number = call.argument<String>("number").orEmpty()
+                    result.success(CallerId.simulateIncoming(this, number))
+                }
+                "previewIncoming" -> {
+                    CallerId.previewIncoming(
+                        this,
+                        call.argument<String>("name").orEmpty(),
+                        call.argument<String>("org").orEmpty(),
+                        call.argument<String>("phone").orEmpty(),
+                    )
+                    result.success(true)
+                }
+                "line1Number" -> result.success(line1Number())
                 else -> result.notImplemented()
             }
         }
@@ -88,6 +104,35 @@ class MainActivity : FlutterActivity() {
         "readCallLog" to CallerId.granted(this, Manifest.permission.READ_CALL_LOG),
         "notifications" to CallerId.canPostNotifications(this),
     )
+
+    /**
+     * 尝试读取本机号码（SIM/电话线路，line1）。
+     * 说明：需 READ_PHONE_STATE；Android 上双卡/CDMA/部分运营商不返回号码属正常，
+     * 取不到不代表设备有问题，仅供开发者联调排查。
+     */
+    private fun line1Number(): Map<String, Any?> {
+        val granted = CallerId.granted(this, Manifest.permission.READ_PHONE_STATE)
+        if (!granted) {
+            return mapOf(
+                "granted" to false,
+                "number" to null,
+                "note" to "未授予“电话”权限，无法读取（可先在此页申请）",
+            )
+        }
+        return try {
+            val tm = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+            val n = tm.line1Number?.trim().orEmpty()
+            mapOf(
+                "granted" to true,
+                "number" to (n.ifBlank { null }),
+                "note" to if (n.isBlank())
+                    "未返回号码：双卡/CDMA/部分运营商不写入 line1，属正常现象"
+                else "",
+            )
+        } catch (e: Exception) {
+            mapOf("granted" to true, "number" to null, "note" to "读取失败：${e.message}")
+        }
+    }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,

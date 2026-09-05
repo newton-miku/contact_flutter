@@ -7,7 +7,7 @@ import '../models/contact.dart';
 import '../remote/contact_api.dart';
 import '../../services/caller_id_sync.dart';
 import '../../services/pinyin_search.dart';
-import '../../config/app_config.dart';
+import '../../config/app_settings.dart';
 
 /// 数据当前来源/可信度，用于界面提示。
 enum DataStatus {
@@ -66,18 +66,51 @@ class ContactsState {
         message: identical(message, _noChange) ? this.message : message as String?,
       );
 
+  /// 联系人的“办公室/值班室”电话条目标记等级（该单位组内置顶）：
+  /// 含“办公室”=1、含“值班室”=2（办公室在值班室前），普通人员=3。
+  static int _entryRank(String displayName) {
+    final n = displayName.trim();
+    if (n.contains('办公室')) return 1;
+    if (n.contains('值班室')) return 2;
+    return 3;
+  }
+
+  /// 稳定排序（Dart List.sort 不保证稳定：同键项按原顺序）。
+  static List<SelectableContact> _stableSort(
+    List<SelectableContact> items,
+    int Function(SelectableContact, SelectableContact) compare,
+  ) {
+    final indexed = <(int, SelectableContact)>[
+      for (var i = 0; i < items.length; i++) (i, items[i]),
+    ];
+    indexed.sort((x, y) {
+      final c = compare(x.$2, y.$2);
+      return c != 0 ? c : x.$1.compareTo(y.$1);
+    });
+    return [for (final e in indexed) e.$2];
+  }
+
+  /// 组内排序：办公室/值班室条目置顶（办公室→值班室），其余按姓名拼音，
+  /// 同名/同类型保持服务器原顺序。
+  static int _compareWithinGroup(SelectableContact a, SelectableContact b) {
+    final ga = _entryRank(a.contact.displayName);
+    final gb = _entryRank(b.contact.displayName);
+    if (ga != gb) return ga - gb;
+    if (ga < 3) return 0; // 办公室/值班室条目：保留原先后顺序
+    final c = PinyinSearch.sortKey(a.contact.displayName)
+        .compareTo(PinyinSearch.sortKey(b.contact.displayName));
+    return c; // 人名按拼音；同拼音交给稳定排序兜底保持原序
+  }
+
   Map<String, List<SelectableContact>> get groupedContacts {
     final map = <String, List<SelectableContact>>{};
     for (final contact in contacts) {
       map.putIfAbsent(contact.groupKey, () => []).add(contact);
     }
-    // 每个分组内部按名字排序
-    for (final key in map.keys) {
-      map[key]!.sort((a, b) => a.contact.displayName.compareTo(b.contact.displayName));
-    }
-    // 分组按键排序
-    return Map.fromEntries(
-      map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    // 组序 = 后端单位排序（服务器已按 units.sort_order 返回，这里保持首次出现顺序），
+    // 组内 = 办公室/值班室置顶 + 姓名拼音。
+    return map.map(
+      (key, members) => MapEntry(key, _stableSort(members, _compareWithinGroup)),
     );
   }
 }
@@ -225,6 +258,14 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
     );
   }
 
+  /// 清空全部选中（退出导出模式 / 重新开始时调用）。
+  void clearSelection() {
+    if (state.contacts.every((c) => !c.isSelected)) return;
+    _update(
+      (list) => list.map((c) => c.copyWith(isSelected: false)).toList(),
+    );
+  }
+
   void clearMessage() => state = state.copyWith(message: null);
 
   void setMessage(String message) => state = state.copyWith(message: message);
@@ -237,8 +278,9 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
 // ---------- Riverpod 提供 ----------
 
 /// HTTP 客户端（测试可 override 为假实现）。
+/// 地址走 [apiBaseProvider]：普通情况 = 构建期注入；开发者模式可在“关于”页改服务器。
 final contactApiProvider = Provider<ContactApi>(
-  (ref) => ContactApi(AppConfig.apiBaseUrl),
+  (ref) => ContactApi(ref.watch(apiBaseProvider)),
 );
 
 /// 本地缓存（测试可 override 为内存实现）。

@@ -48,15 +48,14 @@
                 android:textSize="34sp"
                 android:textStyle="bold" />
 
-            <!-- 单位 · 职务 -->
+            <!-- 单位 · 职务：自动换行（不限制行数/省略），避免职务过长显示不全 -->
             <TextView
                 android:id="@+id/tv_org"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:ellipsize="end"
                 android:gravity="center"
-                android:maxLines="1"
+                android:lineSpacingExtra="2dp"
                 android:textColor="#2563EB"
                 android:textSize="17sp" />
 

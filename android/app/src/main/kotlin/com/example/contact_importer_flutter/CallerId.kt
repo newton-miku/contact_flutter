@@ -28,8 +28,13 @@ import java.util.LinkedHashSet
 object CallerId {
     const val CHANNEL_ID = "incoming_calls"
     const val NOTIFICATION_ID = 0xC011 // "call-id"
+    const val ACTION_DISMISS_CARD = "com.example.contact_importer_flutter.ACTION_DISMISS_CARD"
     private const val PREFS = "caller_id_prefs"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_EVENT_AT = "last_event_at"
+    private const val KEY_EVENT_STATE = "last_event_state"
+    private const val KEY_EVENT_NUMBER = "last_event_number"
+    private const val KEY_EVENT_DECISION = "last_event_decision"
     private const val LOOKUP_FILE = "contacts_lookup.json"
 
     /** 命中结果：姓名/单位/职务 + 库里存的号码原文。 */
@@ -45,6 +50,32 @@ object CallerId {
 
     fun setEnabled(c: Context, on: Boolean) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
+    }
+
+    // ---------- 来电事件记录（诊断：receiver 是否被系统广播唤醒、是否取到号） ----------
+
+    /** receiver 每次处理一次响铃/接通/挂断时落一条记录，设置页据此判断“开了却没反应”卡在哪一步。 */
+    fun recordPhoneEvent(c: Context, state: String, number: String, decision: String) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_EVENT_AT, System.currentTimeMillis())
+            .putString(KEY_EVENT_STATE, state)
+            .putString(KEY_EVENT_NUMBER, number)
+            .putString(KEY_EVENT_DECISION, decision)
+            .apply()
+    }
+
+    /** 最近一条来电事件；无记录返回 null（= 系统从未把响铃广播交给本应用）。 */
+    fun lastPhoneEvent(c: Context): Map<String, Any?>? {
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val at = p.getLong(KEY_EVENT_AT, 0L)
+        if (at == 0L) return null
+        return mapOf(
+            "at" to at,
+            "state" to (p.getString(KEY_EVENT_STATE, "") ?: ""),
+            "number" to (p.getString(KEY_EVENT_NUMBER, "") ?: ""),
+            "decision" to (p.getString(KEY_EVENT_DECISION, "") ?: ""),
+        )
     }
 
     // ---------- 权限 / 能力 ----------
@@ -166,8 +197,8 @@ object CallerId {
     private var lastShown = ""
     private var lastShownAt = 0L
 
-    fun showIncoming(c: Context, number: String, hit: Hit) {
-        if (lastShown == number && System.currentTimeMillis() - lastShownAt < 8000) return
+    fun showIncoming(c: Context, number: String, hit: Hit, skipDedupe: Boolean = false) {
+        if (!skipDedupe && lastShown == number && System.currentTimeMillis() - lastShownAt < 8000) return
         lastShown = number
         lastShownAt = System.currentTimeMillis()
 
@@ -203,13 +234,86 @@ object CallerId {
         }
     }
 
-    /** 来电结束/接通时调用，收起名片。 */
+    /** 来电结束/接通时调用，收起名片（取消通知 + 通知仍在显示的名片页关闭）。 */
     fun dismiss(c: Context) {
         lastShown = "" // 允许同一号码快速再来电时再次显示
         try {
             NotificationManagerCompat.from(c).cancel(NOTIFICATION_ID)
         } catch (_: Exception) {
         }
+        // 取消通知只会收起“通知本身”，并不会关掉已被全屏拉起的名片 Activity。
+        // 名片被系统来电界面盖到后台时收不到通话状态，这里显式广播一条关闭信号，
+        // 让仍存活的 IncomingCallActivity 收到后主动 finish()（无该页则无副作用）。
+        try {
+            val i = Intent(ACTION_DISMISS_CARD).setPackage(c.packageName)
+            c.sendBroadcast(i)
+        } catch (_: Exception) {
+        }
+    }
+
+    // ---------- 测试 / 预览（设置页调用；与真实来电走同一套“匹配 + 全屏通知”） ----------
+
+    /**
+     * 模拟一通往通讯录已同步号码的来电：走 [match] + [showIncoming] 完整链路
+     * （等同真实响铃命中后的表现），让用户在设置页就能验证“能不能弹出来”。
+     * 返回结果供 Flutter 给出明确提示，避免“静默失败”。
+     */
+    fun simulateIncoming(c: Context, number: String): Map<String, Any?> {
+        if (!canPostNotifications(c)) {
+            return mapOf("matched" to false, "reason" to "notifications")
+        }
+        val hit = match(c, number)
+        if (hit == null) {
+            return mapOf("matched" to false, "name" to null)
+        }
+        showIncoming(c, number, hit, skipDedupe = true)
+        return mapOf(
+            "matched" to true,
+            "name" to hit.name,
+            "org" to hit.orgLine,
+            "phone" to number,
+        )
+    }
+
+    /**
+     * 纯界面预览：直接拉起名片 Activity（不走通知/全屏系统限制），
+     * 无论权限是否齐全都能先看到名片长什么样。
+     */
+    fun previewIncoming(c: Context, name: String, org: String, phone: String) {
+        val intent = Intent(c, IncomingCallActivity::class.java)
+            .putExtra(IncomingCallActivity.EXTRA_NAME, name)
+            .putExtra(IncomingCallActivity.EXTRA_ORG, org)
+            .putExtra(IncomingCallActivity.EXTRA_PHONE, phone)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { c.startActivity(intent) }
+    }
+
+    /** 设置页“运行状态”一次性取回全部诊断数据。 */
+    fun status(c: Context): Map<String, Any?> {
+        val f = File(c.filesDir, LOOKUP_FILE)
+        var count = 0
+        if (f.exists()) {
+            count = try {
+                JSONArray(f.readText(Charsets.UTF_8)).length()
+            } catch (_: Exception) {
+                -1 // 文件损坏
+            }
+        }
+        val ev = lastPhoneEvent(c)
+        return mapOf(
+            "enabled" to isEnabled(c),
+            "readPhoneState" to granted(c, Manifest.permission.READ_PHONE_STATE),
+            "readCallLog" to granted(c, Manifest.permission.READ_CALL_LOG),
+            "notifications" to canPostNotifications(c),
+            "fullScreenOk" to canUseFullScreen(c),
+            "lookupExists" to f.exists(),
+            "lookupCount" to count,
+            "eventRecorded" to (ev != null),
+            "lastEventAt" to (ev?.get("at") as? Long ?: 0L),
+            "lastEventState" to (ev?.get("state") as? String ?: ""),
+            "lastEventNumber" to (ev?.get("number") as? String ?: ""),
+            "lastEventDecision" to (ev?.get("decision") as? String ?: ""),
+        )
     }
 
     fun ensureChannel(c: Context) {

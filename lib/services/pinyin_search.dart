@@ -80,6 +80,11 @@ class PinyinSearch {
     return false;
   }
 
+  /// 拼音排序键：整串转小写全拼（非中文保持小写原样），用于“按字母顺序”排序。
+  /// 例：'张三' → 'zhangsan'；'政府办' → 'zhengfuban'。
+  static String sortKey(String text) =>
+      _cache.putIfAbsent('key:$text', () => _compute(text)).fullPinyin;
+
   /// 清除拼音缓存（数据刷新时可调用）。
   static void clearCache() => _cache.clear();
 

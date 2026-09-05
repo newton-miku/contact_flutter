@@ -9,6 +9,7 @@ import 'package:contact_importer_flutter/data/models/contact.dart';
 import 'package:contact_importer_flutter/data/providers/contacts_provider.dart';
 import 'package:contact_importer_flutter/data/remote/contact_api.dart';
 import 'package:contact_importer_flutter/main.dart';
+import 'package:contact_importer_flutter/services/app_lock.dart';
 
 const _sample = RemoteContact(
   id: '1',
@@ -57,15 +58,19 @@ void main() {
         overrides: [
           contactApiProvider.overrideWithValue(_FakeApi()),
           contactsCacheProvider.overrideWithValue(cache),
+          // 应用锁在单测环境不读本地插件：以“就绪、未设置”状态起步。
+          appLockProvider
+              .overrideWith((ref) => AppLockNotifier(loadPersistence: false)),
         ],
         child: const ContactImporterApp(),
       ),
     );
 
+    // 等待本地设置(应用锁)就绪 + 数据加载完成
+    await tester.pumpAndSettle();
+
     // 标题出现即说明首页已挂载
     expect(find.text('通讯录'), findsOneWidget);
-
-    await tester.pumpAndSettle();
 
     // 假后端下发的联系人与单位分组可见
     expect(find.text('张三'), findsOneWidget);
@@ -82,6 +87,8 @@ void main() {
         overrides: [
           contactApiProvider.overrideWithValue(emptyApi),
           contactsCacheProvider.overrideWithValue(_FakeCache()),
+          appLockProvider
+              .overrideWith((ref) => AppLockNotifier(loadPersistence: false)),
         ],
         child: const ContactImporterApp(),
       ),

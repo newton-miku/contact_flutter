@@ -9,15 +9,17 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.telephony.TelephonyManager
 import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.NotificationManagerCompat
 
 /**
  * 全屏来电名片（由 setFullScreenIntent 拉起，锁屏也能整屏显示）。
  * 展示命中联系人的 姓名/单位·职务/号码，并提供 回拨/短信/复制/关闭。
- * 监听通话状态：接通或挂断后自动关闭本页。
+ * 关闭时机：①自己监听到接通/挂断；②主接收器来电结束时广播的关闭信号。
  */
 class IncomingCallActivity : Activity() {
 
@@ -25,17 +27,28 @@ class IncomingCallActivity : Activity() {
         const val EXTRA_NAME = "name"
         const val EXTRA_ORG = "org"
         const val EXTRA_PHONE = "phone"
+
+        /// 弹出后的收尾宽限期：此期间内的 OFFHOOK/IDLE/关闭广播一律忽略。
+        /// 原因：部分机型会在全屏卡片拉起的瞬间补发/重发一次接通或挂断广播，
+        /// 若照单收下卡片会“闪一下即消失”。真正的接通/挂断不会发生在弹出瞬间。
+        private const val DISMISS_GRACE_MS = 2000L
     }
+
+    /// 页面创建时刻（单调时钟），用于计算宽限期。
+    private val startedAt = SystemClock.elapsedRealtime()
 
     private val phoneStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
-            if (state == TelephonyManager.EXTRA_STATE_OFFHOOK ||
-                state == TelephonyManager.EXTRA_STATE_IDLE
-            ) {
-                // 已接通或已挂断 → 名片使命完成，让出屏幕
-                if (!isFinishing) finish()
-            }
+            val isEndSignal =
+                intent.action == CallerId.ACTION_DISMISS_CARD ||
+                    state == TelephonyManager.EXTRA_STATE_OFFHOOK ||
+                    state == TelephonyManager.EXTRA_STATE_IDLE
+            if (!isEndSignal) return
+            // 刚弹出前 2 秒内的收尾事件可能是机型补发的重复广播，忽略防“闪退”。
+            if (SystemClock.elapsedRealtime() - startedAt < DISMISS_GRACE_MS) return
+            // 已接通或已挂断（或被主接收器通知收尾）→ 名片使命完成，让出屏幕
+            if (!isFinishing) finish()
         }
     }
 
@@ -91,15 +104,18 @@ class IncomingCallActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        registerReceiver(
-            phoneStateReceiver,
-            IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
-        )
+        // 关键：不能按惯例在 onStop 注销。名片被系统来电界面盖到后台时会先走 onStop，
+        // 若此刻注销就再也收不到「接通/挂断」，卡片会残留。故监听保持到 onDestroy 才解绑。
+        val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
+        filter.addAction(CallerId.ACTION_DISMISS_CARD)
+        registerReceiver(phoneStateReceiver, filter)
     }
 
-    override fun onStop() {
-        super.onStop()
+    override fun onDestroy() {
         runCatching { unregisterReceiver(phoneStateReceiver) }
+        // 页面收尾时把可能残留的全屏通知一并移除（取消通知并不会自动关掉页面，这里补上）。
+        runCatching { NotificationManagerCompat.from(this).cancel(CallerId.NOTIFICATION_ID) }
+        super.onDestroy()
     }
 
     private fun dial() {

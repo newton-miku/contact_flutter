@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -12,6 +13,8 @@ import '../widgets/avatar.dart';
 import '../widgets/contact_detail_sheet.dart';
 import '../widgets/group_header.dart';
 import '../widgets/search_bar.dart';
+import 'about_screen.dart';
+import 'app_lock_settings_screen.dart';
 import 'caller_id_settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -24,6 +27,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
   String _query = '';
+  // 导出模式：仅在此模式下才可勾选联系人并导出。默认浏览态 = 点击查看详情/复制/拨打。
+  bool _exportMode = false;
 
   @override
   void initState() {
@@ -65,135 +70,146 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
 
     final filteredGroups = _filterGroups(state.groupedContacts, _query);
+    final allSelected =
+        state.contacts.isNotEmpty && state.selectedCount == state.contacts.length;
 
     return Scaffold(
       backgroundColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
+        // 导出模式下用返回箭头退出（若已有勾选会先确认），其余时间无 leading。
+        leading: _exportMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: '退出选择',
+                onPressed: _exitExportMode,
+              )
+            : null,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '通讯录',
+              _exportMode ? '选择要导出的联系人' : '通讯录',
               style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
             Text(
-              _statusSubtitle(state),
+              _exportMode
+                  ? '点选联系人，点分组标题可整组选择'
+                  : _statusSubtitle(state),
               style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
             ),
           ],
         ),
-        actions: [
-          // ---------- 高级功能菜单 ----------
-          PopupMenuButton<_MenuAction>(
-            icon: const Icon(Icons.more_vert),
-            tooltip: '高级功能',
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            onSelected: (action) {
-              switch (action) {
-                case _MenuAction.selectAll:
-                  final allSelected = state.selectedCount == state.contacts.length;
-                  ref.read(contactsProvider.notifier).selectAll(!allSelected);
-                case _MenuAction.export:
-                  _exportSelected(context);
-                case _MenuAction.callerId:
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CallerIdSettingsScreen()),
-                  );
-                case _MenuAction.about:
-                  _showAbout(context);
-                case _MenuAction.checkUpdate:
-                  _checkUpdate(context);
-              }
-            },
-            itemBuilder: (_) => [
-              // 来电显示（Android 全屏名片）
-              const PopupMenuItem(
-                value: _MenuAction.callerId,
-                child: Row(
-                  children: [
-                    Icon(Icons.phone_in_talk, size: 20),
-                    SizedBox(width: 12),
-                    Text('来电显示'),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              // 全选 / 取消全选
-              PopupMenuItem(
-                value: _MenuAction.selectAll,
-                child: Row(
-                  children: [
-                    Icon(
-                      state.selectedCount == state.contacts.length
-                          ? Icons.deselect
-                          : Icons.select_all,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(state.selectedCount == state.contacts.length ? '取消全选' : '全选'),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              // 导出到系统通讯录（需生物认证）
-              PopupMenuItem(
-                value: _MenuAction.export,
-                enabled: state.selectedCount > 0,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.lock_outline,
-                      size: 20,
-                      color: state.selectedCount > 0 ? null : colorScheme.outline,
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('导出到系统通讯录'),
-                        Text(
-                          '需生物认证 · 已选 ${state.selectedCount} 个',
-                          style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline),
+        actions: _exportMode
+            ? []
+            : [
+                // ---------- 高级功能菜单 ----------
+                PopupMenuButton<_MenuAction>(
+                  icon: const Icon(Icons.more_vert),
+                  tooltip: '高级功能',
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _MenuAction.export:
+                        _enterExportMode();
+                      case _MenuAction.appLock:
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const AppLockSettingsScreen()),
+                        );
+                      case _MenuAction.callerId:
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const CallerIdSettingsScreen()),
+                        );
+                      case _MenuAction.about:
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const AboutScreen()),
+                        );
+                      case _MenuAction.checkUpdate:
+                        _checkUpdate(context);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    // 应用锁（Windows 桌面版不提供解锁要求，不显示）
+                    if (defaultTargetPlatform != TargetPlatform.windows) ...[
+                      const PopupMenuItem(
+                        value: _MenuAction.appLock,
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock_outline, size: 20),
+                            SizedBox(width: 12),
+                            Text('应用锁'),
+                          ],
                         ),
-                      ],
+                      ),
+                      const PopupMenuDivider(),
+                    ],
+                    // 来电显示（Android 全屏名片）
+                    const PopupMenuItem(
+                      value: _MenuAction.callerId,
+                      child: Row(
+                        children: [
+                          Icon(Icons.phone_in_talk, size: 20),
+                          SizedBox(width: 12),
+                          Text('来电显示'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    // 导出：进入「导出模式」后才可勾选联系人
+                    PopupMenuItem(
+                      value: _MenuAction.export,
+                      child: Row(
+                        children: [
+                          const Icon(Icons.person_add_outlined, size: 20),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('导出到系统通讯录…'),
+                              Text(
+                                '进入选择模式 · 需生物认证',
+                                style: theme.textTheme.labelSmall
+                                    ?.copyWith(color: colorScheme.outline),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    // 检查更新
+                    const PopupMenuItem(
+                      value: _MenuAction.checkUpdate,
+                      child: Row(
+                        children: [
+                          Icon(Icons.system_update_outlined, size: 20),
+                          SizedBox(width: 12),
+                          Text('检查更新'),
+                        ],
+                      ),
+                    ),
+                    // 关于
+                    const PopupMenuItem(
+                      value: _MenuAction.about,
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 20),
+                          SizedBox(width: 12),
+                          Text('关于'),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
-              const PopupMenuDivider(),
-              // 检查更新
-              const PopupMenuItem(
-                value: _MenuAction.checkUpdate,
-                child: Row(
-                  children: [
-                    Icon(Icons.system_update_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('检查更新'),
-                  ],
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: '刷新',
+                  onPressed: () => ref.read(contactsProvider.notifier).load(),
                 ),
-              ),
-              // 关于
-              const PopupMenuItem(
-                value: _MenuAction.about,
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 20),
-                    SizedBox(width: 12),
-                    Text('关于'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
-            onPressed: () => ref.read(contactsProvider.notifier).load(),
-          ),
-        ],
+              ],
       ),
       body: Column(
         children: [
@@ -208,7 +224,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ? const _EmptyView()
                     : _ContactList(
                         groups: filteredGroups,
-                        selectionMode: state.selectedCount > 0,
+                        selectionMode: _exportMode,
                         onContactTap: (contact) => _showDetail(context, contact),
                         onToggle: (id) => ref.read(contactsProvider.notifier).toggle(id),
                         onGroupToggle: (key) =>
@@ -217,12 +233,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      // ---------- 底部选中计数条 ----------
-      bottomNavigationBar: state.selectedCount > 0
-          ? _SelectedBar(
+      // ---------- 导出模式底部操作条（浏览态不显示） ----------
+      bottomNavigationBar: _exportMode
+          ? _ExportModeBar(
               count: state.selectedCount,
               total: state.contacts.length,
-              onExport: () => _exportSelected(context),
+              allSelected: allSelected,
+              onToggleAll: () =>
+                  ref.read(contactsProvider.notifier).selectAll(!allSelected),
+              onExport: _confirmAndExport,
             )
           : null,
     );
@@ -284,7 +303,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _exportSelected(BuildContext context) async {
+  // ---------- 导出模式进出 ----------
+
+  /// 进入导出模式：清空上次选择，展示勾选与导出条。
+  void _enterExportMode() {
+    ref.read(contactsProvider.notifier).clearSelection();
+    setState(() => _exportMode = true);
+  }
+
+  /// 退出导出模式：已有勾选时先确认（避免误触丢选择）。
+  Future<void> _exitExportMode() async {
+    final selectedCount = ref.read(contactsProvider).selectedCount;
+    if (selectedCount > 0) {
+      final leave = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('退出选择'),
+          content: Text('已勾选 $selectedCount 位联系人，退出后将清空选择。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('继续选择'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('退出并清空'),
+            ),
+          ],
+        ),
+      );
+      if (leave != true) return;
+    }
+    _leaveExportMode();
+  }
+
+  /// 无条件退出选择模式并清空勾选（导出结束 / 无勾选退出时用）。
+  void _leaveExportMode() {
+    ref.read(contactsProvider.notifier).clearSelection();
+    if (!mounted) return;
+    setState(() => _exportMode = false);
+  }
+
+  // ---------- 导出执行 ----------
+
+  Future<void> _confirmAndExport() async {
     final selected = ref
         .read(contactsProvider)
         .contacts
@@ -293,7 +356,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         .toList();
 
     if (selected.isEmpty) {
-      ref.read(contactsProvider.notifier).setMessage('请先选择要导出的联系人');
+      ref.read(contactsProvider.notifier).setMessage('请先点选要导出的联系人');
       return;
     }
 
@@ -327,6 +390,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
 
     if (!authResult.granted) {
+      // 认证失败：留在导出模式，可重试。
       ref.read(contactsProvider.notifier).setMessage(authResult.error ?? '认证失败，无法导出');
       return;
     }
@@ -334,32 +398,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final result = await ContactsExporter.export(selected);
     if (result.permissionDenied) {
       ref.read(contactsProvider.notifier).setMessage('缺少通讯录权限，无法导出');
-      return;
+    } else {
+      ref.read(contactsProvider.notifier).setMessage('成功导出 ${result.success} 个，失败 ${result.failure} 个');
     }
-    ref.read(contactsProvider.notifier).setMessage('成功导出 ${result.success} 个，失败 ${result.failure} 个');
-  }
-
-  void _showAbout(BuildContext context) {
-    showAboutDialog(
-      context: context,
-      applicationName: '通讯录',
-      applicationVersion: '1.0.0',
-      applicationIcon: const Icon(Icons.contact_phone, size: 48, color: Colors.blue),
-      children: [
-        const SizedBox(height: 16),
-        Text(
-          '公司通讯录客户端。联系人数据由通讯录服务器下发，'
-          '客户端会缓存最近一次数据，并在版本号变化时自动更新，减少重复拉取。\n\n'
-          '功能：\n'
-          '• 按部门分组浏览\n'
-          '• 拼音 / 首字母搜索\n'
-          '• 一键呼叫 / 发短信\n'
-          '• 生物认证导出到系统通讯录\n'
-          '• 来电显示名片（Android：通讯录内的人来电时全屏显示单位职务）',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    );
+    // 导出动作结束后退出选择模式，回到普通浏览界面。
+    _leaveExportMode();
   }
 
   Future<void> _checkUpdate(BuildContext context) async {
@@ -390,18 +433,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
 // ==================== 菜单动作枚举 ====================
 
-enum _MenuAction { callerId, selectAll, export, about, checkUpdate }
+enum _MenuAction { callerId, appLock, export, about, checkUpdate }
 
-// ==================== 底部选中计数条 ====================
+// ==================== 导出模式底部操作条 ====================
 
-class _SelectedBar extends StatelessWidget {
+class _ExportModeBar extends StatelessWidget {
   final int count;
   final int total;
+  final bool allSelected;
+  final VoidCallback onToggleAll;
   final VoidCallback onExport;
 
-  const _SelectedBar({
+  const _ExportModeBar({
     required this.count,
     required this.total,
+    required this.allSelected,
+    required this.onToggleAll,
     required this.onExport,
   });
 
@@ -411,7 +458,7 @@ class _SelectedBar extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         boxShadow: [
@@ -422,38 +469,60 @@ class _SelectedBar extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: total > 0 ? count / total : 0,
-                  backgroundColor: colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(3),
-                  minHeight: 5,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '已选 $count 个',
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ],
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            // 全选 / 取消全选
+            OutlinedButton.icon(
+              onPressed: onToggleAll,
+              icon: Icon(
+                allSelected ? Icons.deselect : Icons.select_all,
+                size: 18,
+              ),
+              label: Text(allSelected ? '取消全选' : '全选'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          FilledButton.tonalIcon(
-            onPressed: onExport,
-            icon: const Icon(Icons.person_add, size: 20),
-            label: const Text('导出'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LinearProgressIndicator(
+                    value: total > 0 ? count / total : 0,
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(3),
+                    minHeight: 5,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    count == 0 ? '点击联系人勾选，或点分组标题整组选择' : '已选 $count 个',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: count > 0 ? FontWeight.w600 : FontWeight.w400,
+                      color: count == 0 ? colorScheme.outline : null,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              onPressed: count > 0 ? onExport : null,
+              icon: const Icon(Icons.person_add, size: 20),
+              label: const Text('导出'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -466,6 +535,7 @@ class _ContactList extends StatelessWidget {
   final ValueChanged<RemoteContact> onContactTap;
   final ValueChanged<String> onToggle;
   final ValueChanged<String> onGroupToggle;
+  // 是否为导出模式（可勾选）；浏览态 = 点击看详情。
   final bool selectionMode;
 
   const _ContactList({
@@ -490,7 +560,8 @@ class _ContactList extends StatelessWidget {
           return GroupHeader(
             groupKey: entry.key,
             contacts: entry.value,
-            onToggle: () => onGroupToggle(entry.key),
+            selectMode: selectionMode,
+            onToggle: selectionMode ? () => onGroupToggle(entry.key) : null,
           );
         }
 
@@ -515,7 +586,7 @@ class _ContactTile extends StatelessWidget {
   final SelectableContact selectable;
   final VoidCallback onTap;
   final VoidCallback onToggle;
-  // 当前是否处于选择模式（有任一人被选中）
+  // 导出模式（可勾选）：浏览态下点击看详情，不产生任何选中动作。
   final bool selectionMode;
 
   const _ContactTile({
@@ -538,10 +609,8 @@ class _ContactTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          // 点击 → 查看详情（默认行为，不会选中）
+          // 浏览态：点击查看详情；导出模式：点击勾选/取消勾选。
           onTap: selectionMode ? onToggle : onTap,
-          // 长按 → 选中 / 取消选中
-          onLongPress: onToggle,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -583,13 +652,13 @@ class _ContactTile extends StatelessWidget {
                         Text(
                           contact.orgLine,
                           style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                     ],
                   ),
                 ),
-                // 选择模式下显示 Checkbox
+                // 导出模式下显示 Checkbox
                 if (selectionMode)
                   Checkbox(
                     value: selectable.isSelected,

@@ -6,16 +6,31 @@ import 'package:http/http.dart' as http;
 import '../../config/app_config.dart';
 import '../models/contact.dart';
 
-/// 服务端版本信息（轻量接口）。
+/// 服务端版本信息（轻量接口 /api/version）。
 class ServerVersion {
+  /// 数据版本（每次写入 +1，客户端缓存同步用）。
   final int version;
   final String? updatedAt;
 
-  const ServerVersion({required this.version, this.updatedAt});
+  /// 服务端程序版本 / 构建时刻 / 库结构版本（管理页运维展示用，可能为空）。
+  final String? appVersion;
+  final String? buildTime;
+  final int? schemaVersion;
+
+  const ServerVersion({
+    required this.version,
+    this.updatedAt,
+    this.appVersion,
+    this.buildTime,
+    this.schemaVersion,
+  });
 
   factory ServerVersion.fromJson(Map<String, dynamic> json) => ServerVersion(
         version: (json['version'] as num?)?.toInt() ?? 0,
         updatedAt: json['updatedAt'] as String?,
+        appVersion: json['appVersion'] as String?,
+        buildTime: json['buildTime'] as String?,
+        schemaVersion: (json['schemaVersion'] as num?)?.toInt(),
       );
 }
 
