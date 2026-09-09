@@ -35,6 +35,7 @@ dependencies:
   pinyin: ^3.3.0
   crypto: ^3.0.7
   package_info_plus: ^10.2.1
+  mobile_scanner: ^7.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

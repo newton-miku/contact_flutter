@@ -6,19 +6,23 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.ContactsContract
 import android.telephony.TelephonyManager
-import io.flutter.embedding.android.FlutterActivity
+import android.telephony.SubscriptionManager
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private companion object {
         const val CHANNEL = "com.example.contact_importer_flutter/contacts"
         const val CALLER_ID_CHANNEL = "com.example.contact_importer_flutter/caller_id"
         private const val PERMISSION_REQ = 4101
+        private const val PERMISSION_REQ_NUMBER = 4102
     }
 
     // 来电显示运行时权限请求的回调（requestPermissions 是异步的）
     private var callerIdPermissionResult: MethodChannel.Result? = null
+    // 「读取本机号码」权限请求回调（激活页自动填号用）
+    private var numberPermissionResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -59,14 +63,38 @@ class MainActivity : FlutterActivity() {
                 "setEnabled" -> {
                     val on = call.argument<Boolean>("enabled") ?: false
                     CallerId.setEnabled(this, on)
+                    // 功能开关联动保活服务：开启且允许常驻则拉起，关闭则停掉。
+                    runCatching {
+                        if (on && CallerId.isKeepAlive(this)) {
+                            CallerIdService.start(this)
+                        } else if (!on) {
+                            CallerIdService.stop(this)
+                        }
+                    }
                     result.success(on)
                 }
                 "isEnabled" -> result.success(CallerId.isEnabled(this))
+                "isKeepAlive" -> result.success(CallerId.isKeepAlive(this))
+                "setKeepAlive" -> {
+                    val on = call.argument<Boolean>("enabled") ?: false
+                    CallerId.setKeepAlive(this, on)
+                    runCatching {
+                        if (on && CallerId.isEnabled(this)) {
+                            CallerIdService.start(this)
+                        } else {
+                            CallerIdService.stop(this)
+                        }
+                    }
+                    result.success(on)
+                }
                 "permissions" -> result.success(callerIdPermissions())
                 "requestPermissions" -> {
                     callerIdPermissionResult = result
                     val perms = ArrayList<String>().apply {
                         add(Manifest.permission.READ_PHONE_STATE)
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            add(Manifest.permission.READ_PHONE_NUMBERS)
+                        }
                         add(Manifest.permission.READ_CALL_LOG)
                         if (Build.VERSION.SDK_INT >= 33) {
                             add(Manifest.permission.POST_NOTIFICATIONS)
@@ -94,6 +122,16 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "line1Number" -> result.success(line1Number())
+                "requestNumberPermission" -> {
+                    numberPermissionResult = result
+                    val perms = ArrayList<String>().apply {
+                        add(Manifest.permission.READ_PHONE_STATE)
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            add(Manifest.permission.READ_PHONE_NUMBERS)
+                        }
+                    }
+                    requestPermissions(perms.toTypedArray(), PERMISSION_REQ_NUMBER)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -101,6 +139,7 @@ class MainActivity : FlutterActivity() {
 
     private fun callerIdPermissions(): Map<String, Boolean> = mapOf(
         "readPhoneState" to CallerId.granted(this, Manifest.permission.READ_PHONE_STATE),
+        "readPhoneNumbers" to (Build.VERSION.SDK_INT < 26 || CallerId.granted(this, Manifest.permission.READ_PHONE_NUMBERS)),
         "readCallLog" to CallerId.granted(this, Manifest.permission.READ_CALL_LOG),
         "notifications" to CallerId.canPostNotifications(this),
     )
@@ -111,26 +150,72 @@ class MainActivity : FlutterActivity() {
      * 取不到不代表设备有问题，仅供开发者联调排查。
      */
     private fun line1Number(): Map<String, Any?> {
-        val granted = CallerId.granted(this, Manifest.permission.READ_PHONE_STATE)
-        if (!granted) {
+        val hasPhoneState = CallerId.granted(this, Manifest.permission.READ_PHONE_STATE)
+        val hasPhoneNumbers = Build.VERSION.SDK_INT < 26 ||
+            CallerId.granted(this, Manifest.permission.READ_PHONE_NUMBERS)
+        if (!hasPhoneState && !hasPhoneNumbers) {
             return mapOf(
                 "granted" to false,
                 "number" to null,
-                "note" to "未授予“电话”权限，无法读取（可先在此页申请）",
+                "sims" to emptyList<Map<String, Any?>>(),
+                "note" to "未授予“电话/读取本机号码”权限，无法读取（可先在此页申请）",
             )
         }
         return try {
-            val tm = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
-            val n = tm.line1Number?.trim().orEmpty()
+            val sims = phoneSimNumbers()
+            val found = sims.mapNotNull { it["number"] as? String }
+            val blank = sims.isNotEmpty() && found.isEmpty()
             mapOf(
                 "granted" to true,
-                "number" to (n.ifBlank { null }),
-                "note" to if (n.isBlank())
-                    "未返回号码：双卡/CDMA/部分运营商不写入 line1，属正常现象"
-                else "",
+                "number" to found.firstOrNull(),
+                "sims" to sims,
+                "note" to when {
+                    sims.isEmpty() -> "未检测到 SIM 卡"
+                    blank -> "两张卡都未写入号码：双卡/CDMA/部分运营商不提供 line1，属正常现象"
+                    else -> ""
+                },
             )
         } catch (e: Exception) {
-            mapOf("granted" to true, "number" to null, "note" to "读取失败：${e.message}")
+            mapOf(
+                "granted" to true,
+                "number" to null,
+                "sims" to emptyList<Map<String, Any?>>(),
+                "note" to "读取失败：${e.message}",
+            )
+        }
+    }
+
+    /** 逐张激活 SIM 读取卡号；卡无号码或运营商未写入则为 null。 */
+    private fun phoneSimNumbers(): List<Map<String, Any?>> {
+        if (Build.VERSION.SDK_INT < 22) {
+            val tm = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+            val n = tm.line1Number?.trim().orEmpty()
+            return listOf(
+                mapOf(
+                    "slot" to 1,
+                    "name" to null,
+                    "number" to (n.ifBlank { null }),
+                ),
+            )
+        }
+        val sm = getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+        val infos = sm.activeSubscriptionInfoList
+        if (infos.isNullOrEmpty()) return emptyList()
+        return infos.map { info ->
+            val n = info.number?.trim().orEmpty()
+            mapOf(
+                "slot" to (info.simSlotIndex + 1),
+                "name" to info.displayName?.toString(),
+                "number" to (n.ifBlank { null }),
+            )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 回到前台时若开着来电显示且允许常驻，补拉一次保活服务（系统重启/被杀后可恢复）。
+        if (CallerId.isEnabled(this) && CallerId.isKeepAlive(this)) {
+            runCatching { CallerIdService.start(this) }
         }
     }
 
@@ -142,6 +227,14 @@ class MainActivity : FlutterActivity() {
         if (requestCode == PERMISSION_REQ) {
             callerIdPermissionResult?.success(callerIdPermissions())
             callerIdPermissionResult = null
+            return
+        }
+        if (requestCode == PERMISSION_REQ_NUMBER) {
+            val ok = CallerId.granted(this, Manifest.permission.READ_PHONE_STATE) ||
+                (Build.VERSION.SDK_INT < 26 ||
+                    CallerId.granted(this, Manifest.permission.READ_PHONE_NUMBERS))
+            numberPermissionResult?.success(ok)
+            numberPermissionResult = null
             return
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

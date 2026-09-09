@@ -124,7 +124,14 @@ class CallerIdSync {
   static Future<bool> isEnabled() async =>
       await _invoke('isEnabled') == true;
 
-  /// 当前权限状态（readPhoneState / readCallLog / notifications）。
+  /// 是否开启后台常驻（前台服务保活，默认开）。
+  static Future<bool> isKeepAlive() async =>
+      await _invoke('isKeepAlive') == true;
+
+  static Future<void> setKeepAlive(bool on) =>
+      _invoke('setKeepAlive', {'enabled': on});
+
+  /// 当前权限状态（readPhoneState / readPhoneNumbers / readCallLog / notifications）。
   static Future<Map<String, bool>> permissions() async {
     final r = await _invoke('permissions');
     if (r is Map) {
@@ -132,7 +139,12 @@ class CallerIdSync {
         for (final e in r.entries) '${e.key}': e.value == true,
       };
     }
-    return const {'readPhoneState': false, 'readCallLog': false, 'notifications': false};
+    return const {
+      'readPhoneState': false,
+      'readPhoneNumbers': false,
+      'readCallLog': false,
+      'notifications': false,
+    };
   }
 
   /// 弹系统授权框（READ_PHONE_STATE + READ_CALL_LOG + POST_NOTIFICATIONS），
@@ -188,21 +200,28 @@ class CallerIdSync {
               {'name': name, 'org': org, 'phone': phone}) ==
           true;
 
-  /// 尝试读取本机号码（line1）。返回 {granted, number?, note}；
-  /// 双卡/CDMA/部分运营商不返回号码属正常，仅开发者诊断用。
-  static Future<Map<String, String?>> line1Number() async {
+  /// 申请「读取本机号码」所需权限（电话状态 + 读取本机号码），返回是否已授权。
+  static Future<bool> requestNumberPermission() async =>
+      await _invoke('requestNumberPermission') == true;
+
+  /// 尝试读取本机号码（逐张 SIM）。
+  /// 返回 {granted, number?, note?, sims: [ {slot, name?, number?} ]}；
+  /// 双卡/CDMA/部分运营商不写入号码属正常，仅开发者诊断用。
+  static Future<Map<String, dynamic>> line1Number() async {
     final r = await _invoke('line1Number');
     if (r is Map) {
       return {
         'granted': (r['granted'] == true).toString(),
         'number': r['number'] as String?,
         'note': (r['note'] as String?) ?? '',
+        'sims': r['sims'] is List ? (r['sims'] as List) : const [],
       };
     }
     return const {
       'granted': 'false',
       'number': null,
       'note': '原生通道不可用（仅 Android 支持）',
+      'sims': <Map<String, dynamic>>[],
     };
   }
 

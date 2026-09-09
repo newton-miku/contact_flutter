@@ -29,6 +29,7 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
   final bool _android = defaultTargetPlatform == TargetPlatform.android;
   bool _loading = true;
   bool _enabled = false;
+  bool _keepAlive = true; // 后台常驻（前台服务保活），默认开
   Map<String, bool> _perms = const {};
   bool? _fullScreenOk; // false=需在系统设置开启（仅 Android 14+）；null=非安卓
   CallerIdStatus? _status;
@@ -78,12 +79,14 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
       return;
     }
     final enabled = await CallerIdSync.isEnabled();
+    final keepAlive = await CallerIdSync.isKeepAlive();
     final perms = await CallerIdSync.permissions();
     final st = await CallerIdSync.status();
     if (!mounted) return;
     setState(() {
       _loading = false;
       _enabled = enabled;
+      _keepAlive = keepAlive;
       _perms = perms;
       _fullScreenOk = st.fullScreenOk;
       _status = st;
@@ -113,6 +116,24 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     } else if (!callLog) {
       _toast('未授予“电话/通话记录”：Android 10+ 会读不到来电号码，名片可能不显示。',
           openSettings: true);
+    }
+  }
+
+  Future<void> _onToggleKeepAlive(bool on) async {
+    await CallerIdSync.setKeepAlive(on);
+    if (!mounted) return;
+    await _reload();
+    if (!mounted) return;
+    if (on) {
+      final notif = _perms['notifications'] ?? false;
+      _toast(
+        notif
+            ? '已开启后台常驻：会常驻一条静默通知以保活'
+            : '已开启后台常驻；但通知权限未授予，保活通知可能不显示，建议一并开启通知。',
+        openSettings: !notif,
+      );
+    } else {
+      _toast('已关闭后台常驻：从最近任务划掉后，来电名片可能收不到广播');
     }
   }
 
@@ -302,6 +323,32 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                             color: _enabled ? colorScheme.primary : colorScheme.outline),
                       ),
                     ),
+                    // 后台常驻（前台服务保活）：仅在功能开启时显示，默认开。
+                    if (_enabled) ...[
+                      const SizedBox(height: 12),
+                      Card(
+                        child: SwitchListTile(
+                          value: _keepAlive,
+                          onChanged: _onToggleKeepAlive,
+                          title: const Text('后台常驻（划掉也尽量保持运行）'),
+                          subtitle: Text(_keepAlive
+                              ? '已开启：以前台服务保活，会常驻一条静默通知'
+                              : '关闭后，从最近任务划掉可能收不到来电广播'),
+                          secondary: Icon(Icons.shield_moon_outlined,
+                              color: _keepAlive
+                                  ? colorScheme.primary
+                                  : colorScheme.outline),
+                        ),
+                      ),
+                      if (_keepAlive)
+                        const _TipCard(
+                          icon: Icons.battery_alert,
+                          title: '会略微增加耗电',
+                          subtitle: '保活需要常驻一条“来电名片运行中”的通知（静默、不弹横幅）。'
+                              '若不再需要来电名片，直接关闭上面的「开启来电显示」即可。',
+                          dim: true,
+                        ),
+                    ],
                     const _SectionHeader('所需权限'),
                     Card(
                       child: Column(

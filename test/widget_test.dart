@@ -10,6 +10,7 @@ import 'package:contact_importer_flutter/data/providers/contacts_provider.dart';
 import 'package:contact_importer_flutter/data/remote/contact_api.dart';
 import 'package:contact_importer_flutter/main.dart';
 import 'package:contact_importer_flutter/services/app_lock.dart';
+import 'package:contact_importer_flutter/services/device_auth.dart';
 
 const _sample = RemoteContact(
   id: '1',
@@ -23,6 +24,25 @@ const _sample = RemoteContact(
 class _FakeApi implements ContactApi {
   @override
   String get baseUrl => 'http://fake.local';
+
+  @override
+  String? get token => null;
+
+  @override
+  Future<ActivationResult> activate({
+    required String code,
+    required String phone,
+    String label = '',
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<LoginResult> login({required String username, required String password}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> changePassword({required String oldPassword, required String newPassword}) async =>
+      throw UnimplementedError();
 
   @override
   Future<ServerVersion> fetchVersion() async =>
@@ -61,6 +81,9 @@ void main() {
           // 应用锁在单测环境不读本地插件：以“就绪、未设置”状态起步。
           appLockProvider
               .overrideWith((ref) => AppLockNotifier(loadPersistence: false)),
+          // 已激活（避免测试环境落到激活页）
+          deviceAuthProvider.overrideWith((ref) => DeviceAuthNotifier(
+              loadPersistence: false, initialToken: 'test-token', initialPhone: '13800000000')),
         ],
         child: const ContactImporterApp(),
       ),
@@ -89,6 +112,9 @@ void main() {
           contactsCacheProvider.overrideWithValue(_FakeCache()),
           appLockProvider
               .overrideWith((ref) => AppLockNotifier(loadPersistence: false)),
+          // 已激活（避免测试环境落到激活页）
+          deviceAuthProvider.overrideWith((ref) => DeviceAuthNotifier(
+              loadPersistence: false, initialToken: 'test-token', initialPhone: '13800000000')),
         ],
         child: const ContactImporterApp(),
       ),
@@ -102,6 +128,25 @@ void main() {
 class _EmptyApi implements ContactApi {
   @override
   String get baseUrl => 'http://fake.local';
+
+  @override
+  String? get token => null;
+
+  @override
+  Future<ActivationResult> activate({
+    required String code,
+    required String phone,
+    String label = '',
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<LoginResult> login({required String username, required String password}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> changePassword({required String oldPassword, required String newPassword}) async =>
+      throw UnimplementedError();
 
   @override
   Future<ServerVersion> fetchVersion() async =>

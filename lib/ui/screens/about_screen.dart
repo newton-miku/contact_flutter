@@ -316,6 +316,21 @@ class _AboutScreenState extends ConsumerState<AboutScreen> {
               ),
             ),
           ),
+          // ---------- 版权信息 ----------
+          const SizedBox(height: 20),
+          Center(
+            child: Column(
+              children: [
+                Text('Powered by newton_miku',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 4),
+                Text('© ${AppConfig.buildYear} newton_miku. All rights reserved.',
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: colorScheme.outline)),
+              ],
+            ),
+          ),
         ],
       ),
     );

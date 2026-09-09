@@ -8,6 +8,7 @@ import '../../data/models/contact.dart';
 import '../../data/providers/contacts_provider.dart';
 import '../../services/biometric_auth.dart';
 import '../../services/contacts_exporter.dart';
+import '../../services/device_auth.dart';
 import '../../services/pinyin_search.dart';
 import '../widgets/avatar.dart';
 import '../widgets/contact_detail_sheet.dart';
@@ -129,6 +130,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         );
                       case _MenuAction.checkUpdate:
                         _checkUpdate(context);
+                      case _MenuAction.changePassword:
+                        _changePassword(context);
+                      case _MenuAction.logout:
+                        _logout(context);
                     }
                   },
                   itemBuilder: (_) => [
@@ -202,6 +207,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ],
                       ),
                     ),
+                    // 桌面端：账号密码登录相关
+                    if (defaultTargetPlatform != TargetPlatform.android &&
+                        defaultTargetPlatform != TargetPlatform.iOS) ...[
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: _MenuAction.changePassword,
+                        child: Row(
+                          children: [
+                            Icon(Icons.password, size: 20),
+                            SizedBox(width: 12),
+                            Text('修改密码'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: _MenuAction.logout,
+                        child: Row(
+                          children: [
+                            Icon(Icons.logout, size: 20),
+                            SizedBox(width: 12),
+                            Text('退出登录'),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 IconButton(
@@ -405,6 +435,101 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaveExportMode();
   }
 
+  /// 桌面端：修改当前账号密码。
+  Future<void> _changePassword(BuildContext context) async {
+    final oldCtl = TextEditingController();
+    final newCtl = TextEditingController();
+    final againCtl = TextEditingController();
+    String? err;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('修改密码'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: oldCtl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '当前密码'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: newCtl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '新密码（至少 6 位）'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: againCtl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '再次输入新密码'),
+              ),
+              if (err != null) ...[
+                const SizedBox(height: 10),
+                Text(err!,
+                    style: TextStyle(
+                        color: Theme.of(ctx).colorScheme.error, fontSize: 12)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(
+              onPressed: () {
+                if (newCtl.text.length < 6) {
+                  setD(() => err = '新密码至少 6 位');
+                  return;
+                }
+                if (newCtl.text != againCtl.text) {
+                  setD(() => err = '两次输入不一致');
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(contactApiProvider).changePassword(
+            oldPassword: oldCtl.text,
+            newPassword: newCtl.text,
+          );
+      if (mounted) _toast('密码已修改');
+    } catch (e) {
+      if (mounted) _toast('修改失败：$e');
+    }
+  }
+
+  /// 桌面端：退出登录（清除本地令牌，回到登录页）。
+  Future<void> _logout(BuildContext context) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录？'),
+        content: const Text('退出后需要重新输入账号密码。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('退出')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await ref.read(deviceAuthProvider.notifier).clear();
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
+  }
+
   Future<void> _checkUpdate(BuildContext context) async {
     final text = await ref.read(contactsProvider.notifier).checkForUpdates();
     if (!context.mounted) return;
@@ -433,7 +558,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
 // ==================== 菜单动作枚举 ====================
 
-enum _MenuAction { callerId, appLock, export, about, checkUpdate }
+enum _MenuAction { callerId, appLock, export, about, checkUpdate, changePassword, logout }
 
 // ==================== 导出模式底部操作条 ====================
 

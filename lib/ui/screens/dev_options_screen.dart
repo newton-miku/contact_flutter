@@ -20,6 +20,7 @@ class DevOptionsScreen extends ConsumerStatefulWidget {
 class _DevOptionsScreenState extends ConsumerState<DevOptionsScreen> {
   String? _line1Number;
   String? _line1Note;
+  List<Map<String, dynamic>> _sims = [];
   bool _line1Busy = false;
 
   void _toast(String msg) {
@@ -119,15 +120,21 @@ class _DevOptionsScreenState extends ConsumerState<DevOptionsScreen> {
     if (_line1Busy) return;
     setState(() => _line1Busy = true);
     final perms = await CallerIdSync.permissions();
-    if (!(perms['readPhoneState'] ?? false)) {
+    final canReadLine1 = (perms['readPhoneState'] ?? false) ||
+        (perms['readPhoneNumbers'] ?? false);
+    if (!canReadLine1) {
       await CallerIdSync.requestPermissions();
     }
     final r = await CallerIdSync.line1Number();
     if (!mounted) return;
     setState(() {
       _line1Busy = false;
-      _line1Number = r['number'];
-      _line1Note = r['note'];
+      _line1Number = r['number'] as String?;
+      _line1Note = r['note'] as String?;
+      final list = r['sims'];
+      _sims = (list is List)
+          ? list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : [];
     });
     if (!mounted) return;
     final scheme = Theme.of(context).colorScheme;
@@ -139,14 +146,38 @@ class _DevOptionsScreenState extends ConsumerState<DevOptionsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              _line1Number == null ? '未取得号码' : _line1Number!,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: _line1Number == null ? scheme.error : scheme.primary,
-              ),
-            ),
+            if (_sims.isEmpty)
+              Text(
+                _line1Number == null ? '未取得号码' : _line1Number!,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: _line1Number == null ? scheme.error : scheme.primary,
+                ),
+              )
+            else
+              for (final s in _sims) ...[
+                Row(
+                  children: [
+                    Text(
+                      '卡${((s['slot'] as num?)?.toInt() ?? 1)}'
+                      '${(s['name'] as String?)?.trim().isNotEmpty == true ? '（${s['name']}）' : ''}',
+                      style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant),
+                    ),
+                    const Spacer(),
+                    Text(
+                      (s['number'] as String?) ?? '未写入号码',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: s['number'] == null ? scheme.error : scheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+              ],
             if ((_line1Note ?? '').isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(_line1Note!,

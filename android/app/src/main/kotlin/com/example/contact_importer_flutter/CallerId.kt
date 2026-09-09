@@ -31,6 +31,7 @@ object CallerId {
     const val ACTION_DISMISS_CARD = "com.example.contact_importer_flutter.ACTION_DISMISS_CARD"
     private const val PREFS = "caller_id_prefs"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_KEEP_ALIVE = "keep_alive"
     private const val KEY_EVENT_AT = "last_event_at"
     private const val KEY_EVENT_STATE = "last_event_state"
     private const val KEY_EVENT_NUMBER = "last_event_number"
@@ -50,6 +51,17 @@ object CallerId {
 
     fun setEnabled(c: Context, on: Boolean) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
+    }
+
+    // ---------- 后台常驻（前台服务保活） ----------
+
+    /** 是否启用后台常驻（默认开）：即使从最近任务划掉也尽量保持进程存活。 */
+    fun isKeepAlive(c: Context): Boolean =
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_KEEP_ALIVE, true)
+
+    fun setKeepAlive(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_KEEP_ALIVE, on).apply()
     }
 
     // ---------- 来电事件记录（诊断：receiver 是否被系统广播唤醒、是否取到号） ----------

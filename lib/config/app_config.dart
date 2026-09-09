@@ -26,6 +26,11 @@ abstract final class AppConfig {
     return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
   }
 
+  /// 构建年份（版权信息用）：取构建时注入的 BUILD_TIME 的年份；
+  /// 未注入（本地直接 run）时回退当前年份。
+  static int get buildYear =>
+      DateTime.tryParse(buildTimeRaw)?.year ?? DateTime.now().year;
+
   /// 请求超时时间。
   static const Duration requestTimeout = Duration(seconds: 6);
 }

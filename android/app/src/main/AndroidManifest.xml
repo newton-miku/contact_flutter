@@ -12,11 +12,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 来电显示名片：响铃状态 + 号码（Android 10+ 需 READ_CALL_LOG 才能拿到号码） -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Android 13+ 通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 全屏意图通知（来电名片顶到系统来电界面；Android 14+ 需用户在系统设置里放行） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 扫码激活：扫描管理员发放的激活码二维码（相机非必需，无摄像头设备也能用） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- 前台服务保活：让进程在用户划掉后台后仍尽量存活，保证来电广播及时送达 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <queries>
         <intent>
@@ -74,6 +82,16 @@
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- 来电名片常驻前台服务（保活，可在设置里关闭） -->
+        <service
+            android:name=".CallerIdService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="caller_id_detection" />
+        </service>
 
         <meta-data
             android:name="flutterEmbedding"

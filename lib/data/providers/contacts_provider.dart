@@ -8,6 +8,7 @@ import '../remote/contact_api.dart';
 import '../../services/caller_id_sync.dart';
 import '../../services/pinyin_search.dart';
 import '../../config/app_settings.dart';
+import '../../services/device_auth.dart';
 
 /// 数据当前来源/可信度，用于界面提示。
 enum DataStatus {
@@ -32,6 +33,9 @@ class ContactsState {
   final DataStatus status;
   final String? message;
 
+  /// 令牌失效（HTTP 401）：需要重新激活。AppRoot 据此切到激活页。
+  final bool unauthorized;
+
   const ContactsState({
     this.loading = true,
     this.syncing = false,
@@ -40,6 +44,7 @@ class ContactsState {
     this.updatedAt,
     this.status = DataStatus.server,
     this.message,
+    this.unauthorized = false,
   });
 
   int get selectedCount => contacts.where((c) => c.isSelected).length;
@@ -55,6 +60,7 @@ class ContactsState {
     String? updatedAt,
     DataStatus? status,
     Object? message = _noChange,
+    bool? unauthorized,
   }) =>
       ContactsState(
         loading: loading ?? this.loading,
@@ -64,6 +70,7 @@ class ContactsState {
         updatedAt: updatedAt ?? this.updatedAt,
         status: status ?? this.status,
         message: identical(message, _noChange) ? this.message : message as String?,
+        unauthorized: unauthorized ?? this.unauthorized,
       );
 
   /// 联系人的“办公室/值班室”电话条目标记等级（该单位组内置顶）：
@@ -191,6 +198,11 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
         PinyinSearch.clearCache();
         _show(snapshot, status: DataStatus.server, syncing: false);
       } catch (e) {
+        if (e is UnauthorizedException) {
+          // 令牌失效：清空数据并标记未授权，由 AppRoot 切到激活页。
+          state = const ContactsState(loading: false, unauthorized: true);
+          return;
+        }
         final msg = e is NetworkException ? e.message : '加载失败：$e';
         if (cached != null) {
           _show(cached, status: DataStatus.offline, syncing: false, message: msg);
@@ -278,10 +290,12 @@ class ContactsNotifier extends StateNotifier<ContactsState> {
 // ---------- Riverpod 提供 ----------
 
 /// HTTP 客户端（测试可 override 为假实现）。
-/// 地址走 [apiBaseProvider]：普通情况 = 构建期注入；开发者模式可在“关于”页改服务器。
-final contactApiProvider = Provider<ContactApi>(
-  (ref) => ContactApi(ref.watch(apiBaseProvider)),
-);
+/// 地址走 [apiBaseProvider]；令牌走 [deviceAuthProvider]（激活后自动带上，变化时重建）。
+final contactApiProvider = Provider<ContactApi>((ref) {
+  final base = ref.watch(apiBaseProvider);
+  final token = ref.watch(deviceAuthProvider.select((s) => s.token));
+  return ContactApi(base, token: token);
+});
 
 /// 本地缓存（测试可 override 为内存实现）。
 final contactsCacheProvider = Provider<ContactsCache>(

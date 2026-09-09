@@ -2,19 +2,22 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/providers/contacts_provider.dart';
 import '../../services/app_lock.dart';
+import '../../services/device_auth.dart';
+import 'activation_screen.dart';
+import 'login_screen.dart';
 import 'app_lock_gate_screen.dart';
 import 'app_lock_setup_screen.dart';
 import 'home_screen.dart';
 
-/// App 根路由：冷启动门禁 + 首次启动“设置应用锁”引导。
+/// App 根路由：设备激活门禁 + 冷启动应用锁 + 首次启动“设置应用锁”引导。
 ///
-/// 规则：
-/// - Windows/桌面版不做解锁要求，直接进主界面；
-/// - 手机端：冷启动时若已设置并开启应用锁 → 先显示解锁页，验证后才进入主界面；
-///   切后台再回来不重复锁；
-/// - 首次启动（未设置过密码且未处理过引导）→ 弹一次“设置应用锁”，可跳过
-///   （跳过按钮做小、低对比）。
+/// 规则（自上而下）：
+/// 1. 未激活（无设备令牌）→ 激活页；令牌失效（401）→ 清令牌回激活页；
+/// 2. Windows/桌面版不做应用锁，激活后直接进主界面；
+/// 3. 手机端冷启动若已设置并开启应用锁 → 先解锁；切后台再回来不重复锁；
+/// 4. 首次启动（未设置过密码且未处理过引导）→ 弹一次“设置应用锁”，可跳过。
 class AppRoot extends ConsumerStatefulWidget {
   const AppRoot({super.key});
 
@@ -29,29 +32,43 @@ class _AppRootState extends ConsumerState<AppRoot> {
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final state = ref.watch(appLockProvider);
-
-    // 桌面/网页版：不启用应用锁。
-    if (!_mobile) return const HomeScreen();
-
-    // 本地设置尚未读取完成：先显示空白页，避免“闪一下主界面再上锁”。
-    if (!state.ready) {
-      return Scaffold(
-        backgroundColor: theme.colorScheme.surface,
+  Widget _blank() => Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
         body: const SizedBox.expand(),
       );
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = ref.watch(deviceAuthProvider);
+    final lock = ref.watch(appLockProvider);
+    final contacts = ref.watch(contactsProvider);
+
+    if (!auth.ready) return _blank();
+
+    // 令牌失效（HTTP 401）：清掉本地令牌，回到激活页。
+    if (contacts.unauthorized && auth.activated) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(deviceAuthProvider.notifier).clear();
+      });
+    }
+    if (!auth.activated || contacts.unauthorized) {
+      // 手机端：激活码；桌面端：账号密码登录。
+      return _mobile ? const ActivationScreen() : const LoginScreen();
     }
 
+    // 桌面/网页版：不做应用锁。
+    if (!_mobile) return const HomeScreen();
+
+    // 应用锁设置尚未读取完成：先空白页，避免“闪一下主界面再上锁”。
+    if (!lock.ready) return _blank();
+
     // 需要解锁（冷启动）：显示解锁页。
-    if (state.shouldLock) {
+    if (lock.shouldLock) {
       return const AppLockGateScreen();
     }
 
     // 首次启动引导：处理过一次（设置或跳过）后不再打扰。
-    if (!_prompted && !state.askedOnce && !state.configured) {
+    if (!_prompted && !lock.askedOnce && !lock.configured) {
       _prompted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _showOnboarding());
     }
