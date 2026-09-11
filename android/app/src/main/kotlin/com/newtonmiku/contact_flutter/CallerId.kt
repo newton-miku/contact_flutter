@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.app.role.RoleManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
@@ -30,6 +31,9 @@ object CallerId {
     const val CHANNEL_ID = "incoming_calls"
     const val NOTIFICATION_ID = 0xC011 // "call-id"
     const val ACTION_DISMISS_CARD = "com.newtonmiku.contact_flutter.ACTION_DISMISS_CARD"
+
+    /** 常驻通知上的「关闭常驻」按钮：停止前台服务并关闭开关。 */
+    const val ACTION_STOP_KEEPALIVE = "com.newtonmiku.contact_flutter.ACTION_STOP_KEEPALIVE"
     private const val PREFS = "caller_id_prefs"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_KEEP_ALIVE = "keep_alive"
@@ -120,6 +124,8 @@ object CallerId {
             "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             "notification" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+            "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                .setData(Uri.fromParts("package", c.packageName, null))
             else -> appDetails
         }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val ok = runCatching { c.startActivity(intent) }.isSuccess
@@ -137,6 +143,43 @@ object CallerId {
      * （即 ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT，需带 EXTRA_APP_PACKAGE）。
      * 老系统/该页不可用时回退到通知渠道设置页。
      */
+    /** 是否已取得「来电筛选」角色（响铃瞬间即可拿到号码，名片最快）。 */
+    fun hasScreeningRole(c: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
+        val rm = c.getSystemService(RoleManager::class.java) ?: return false
+        return runCatching { rm.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) }.getOrDefault(false)
+    }
+
+    /** 本机是否可申请「来电筛选」角色（被其它应用占用/ROM 限制时为 false）。 */
+    fun screeningRoleAvailable(c: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
+        val rm = c.getSystemService(RoleManager::class.java) ?: return false
+        return runCatching { rm.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) }.getOrDefault(false)
+    }
+
+    /**
+     * 「来电筛选」回调专用：命中通讯录就弹名片（复用同一套匹配/去重/展示逻辑），
+     * 返回给诊断记录用的结论文案。
+     */
+    fun showIfKnownFromScreening(c: Context, number: String): String {
+        if (!canPostNotifications(c)) return "通知未开启，名片无法弹出"
+        val hit = match(c, number) ?: return "陌生号码（号码库未命中），按设计不显示"
+        showIncoming(c, number, hit)
+        return "命中「${hit.name}」，已弹全屏名片（来电筛选，响铃即时）"
+    }
+
+    /** 是否已授予「显示在其他应用上层」（悬浮窗）：授予后可在后台直接拉起名片页。 */
+    fun canDrawOverlays(c: Context): Boolean = Settings.canDrawOverlays(c)
+
+    /** 打开「显示在其他应用上层」授权页。 */
+    fun openOverlaySettings(c: Context) {
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+            .setData(Uri.fromParts("package", c.packageName, null))
+        if (runCatching { c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isFailure) {
+            openSystemSettings(c, "app")
+        }
+    }
+
     fun openFullScreenSettings(c: Context) {
         val channel = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
@@ -177,10 +220,24 @@ object CallerId {
         }
     }
 
-    /** 一次读入文件并建索引（联系人量级为几百~几千，毫秒级）。 */
+    // 号码库解析结果的内存缓存：钥匙是「文件大小 + 最后修改时间」。
+    // 每次来电都重新读文件+解析 JSON 会带来几十~上百毫秒的延迟，缓存后只解析一次。
+    @Volatile
+    private var cachedIndex: Map<String, Hit>? = null
+    private var cachedKey: String = ""
+
+    /** 一次读入文件并建索引（联系人量级为几百~几千，毫秒级；结果带缓存）。 */
     private fun loadIndex(c: Context): Map<String, Hit>? {
         val f = File(c.filesDir, LOOKUP_FILE)
-        if (!f.exists()) return null
+        if (!f.exists()) {
+            cachedIndex = null
+            cachedKey = ""
+            return null
+        }
+        val key = "${f.length()}:${f.lastModified()}"
+        if (key == cachedKey) {
+            cachedIndex?.let { return it }
+        }
         val text = try {
             f.readText(Charsets.UTF_8)
         } catch (_: Exception) {
@@ -204,6 +261,8 @@ object CallerId {
             )
             for (v in numberVariants(digits)) index.putIfAbsent(v, hit)
         }
+        cachedIndex = index
+        cachedKey = key
         return index
     }
 
@@ -234,10 +293,20 @@ object CallerId {
 
     /** 在本地通讯录缓存里找号码；未命中返回 null。 */
     fun match(c: Context, raw: String): Hit? {
+        val t0 = android.os.SystemClock.elapsedRealtime()
         val digits = raw.filter(Char::isDigit)
         if (digits.length < 3) return null
-        val index = loadIndex(c) ?: return null
-        for (v in numberVariants(digits)) index[v]?.let { return it }
+        val index = loadIndex(c) ?: run {
+            android.util.Log.i("CallerId", "号码库不存在，无法匹配")
+            return null
+        }
+        for (v in numberVariants(digits)) index[v]?.let {
+            android.util.Log.i("CallerId",
+                "匹配命中「${it.name}」（库 ${index.size} 条，耗时 ${android.os.SystemClock.elapsedRealtime() - t0}ms）")
+            return it
+        }
+        android.util.Log.i("CallerId",
+            "未命中陌生号码（库 ${index.size} 条，耗时 ${android.os.SystemClock.elapsedRealtime() - t0}ms）")
         return null
     }
 
@@ -253,6 +322,16 @@ object CallerId {
         lastShown = number
         lastShownAt = System.currentTimeMillis()
 
+        // 尽量不抛异常：不同 ROM 上通知渠道/PendingIntent 都可能抛非 SecurityException 的异常，
+        // 而调用方（广播接收器/筛选服务）一旦抛出就会导致进程崩溃。
+        try {
+            showIncomingInner(c, number, hit)
+        } catch (e: Throwable) {
+            android.util.Log.w("CallerId", "展示名片失败（已忽略）", e)
+        }
+    }
+
+    private fun showIncomingInner(c: Context, number: String, hit: Hit) {
         if (!canPostNotifications(c)) return
         ensureChannel(c)
 
@@ -266,6 +345,13 @@ object CallerId {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // 亮屏兜底：系统只把全屏意图用在「锁屏/息屏」；已授予「显示在其他应用上层」时
+        // 改为直接拉起名片页（后台启动 Activity 因该权限被放行），亮屏使用中也能整屏弹出。
+        val overlayOk = canDrawOverlays(c)
+        if (overlayOk) {
+            runCatching { c.startActivity(open) }
+        }
+
         val builder = NotificationCompat.Builder(c, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -274,16 +360,32 @@ object CallerId {
             .setContentTitle(hit.name)
             .setContentText(if (hit.orgLine.isEmpty()) number else hit.orgLine)
             .setContentIntent(pi)
-            .setFullScreenIntent(pi, true) // 主流来电名片做法：顶到系统来电界面
             .setOngoing(true)
             .setAutoCancel(false)
+        // 有悬浮窗权限时页面已直接拉起，再带全屏意图会出现「横幅 + 卡片」重复，故只在无该权限时使用。
+        if (!overlayOk) {
+            builder.setFullScreenIntent(pi, true) // 主流来电名片做法：顶到系统来电界面
+        }
 
         try {
             NotificationManagerCompat.from(c).notify(NOTIFICATION_ID, builder.build())
-        } catch (_: SecurityException) {
+        } catch (e: Throwable) {
             // POST_NOTIFICATIONS 被系统收紧等，静默放弃本次展示
+            android.util.Log.w("CallerId", "notify 失败（已忽略）", e)
         }
     }
+
+    /** 最近 [withinMs] 毫秒内是否弹过名片（用于避免补号失败信息覆盖掉成功结论）。 */
+    fun shownRecently(withinMs: Long): Boolean =
+        lastShown.isNotEmpty() && System.currentTimeMillis() - lastShownAt < withinMs
+
+    /**
+     * 同一个号码是否刚弹过名片。补号线程据此去重：
+     * 来电筛选（或带号广播）已经弹过之后，补号再补到同一个号时不能重复弹第二张卡片。
+     */
+    fun wasShownRecently(number: String, withinMs: Long = 30_000): Boolean =
+        lastShown.isNotEmpty() && lastShown == number &&
+            System.currentTimeMillis() - lastShownAt < withinMs
 
     /** 来电结束/接通时调用，收起名片（取消通知 + 通知仍在显示的名片页关闭）。 */
     fun dismiss(c: Context) {
@@ -357,6 +459,9 @@ object CallerId {
             "readCallLog" to granted(c, Manifest.permission.READ_CALL_LOG),
             "notifications" to canPostNotifications(c),
             "fullScreenOk" to canUseFullScreen(c),
+            "overlayOk" to canDrawOverlays(c),
+            "screeningRoleHeld" to hasScreeningRole(c),
+            "screeningRoleAvailable" to screeningRoleAvailable(c),
             "lookupExists" to f.exists(),
             "lookupCount" to count,
             "eventRecorded" to (ev != null),

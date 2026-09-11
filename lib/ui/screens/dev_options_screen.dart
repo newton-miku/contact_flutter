@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../config/app_config.dart';
@@ -115,6 +116,50 @@ class _DevOptionsScreenState extends ConsumerState<DevOptionsScreen> {
   }
 
   // ---------- 本机号码诊断 ----------
+
+  /// 查看 App 上次崩溃的堆栈（真机排障用，不需要 adb）。
+  Future<void> _showLastCrash() async {
+    final text = await CallerIdSync.lastCrash();
+    if (!mounted) return;
+    if (text == null) {
+      _toast('没有崩溃记录');
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('上次崩溃日志'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: text));
+              if (ctx.mounted) Navigator.pop(ctx);
+              _toast('已复制到剪贴板');
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await CallerIdSync.clearCrash();
+              if (ctx.mounted) Navigator.pop(ctx);
+              _toast('已清除崩溃记录');
+            },
+            child: const Text('清除'),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+        ],
+      ),
+    );
+  }
 
   Future<void> _tryLine1() async {
     if (_line1Busy) return;
@@ -268,22 +313,34 @@ class _DevOptionsScreenState extends ConsumerState<DevOptionsScreen> {
           ),
           const _SectionTitle('测试与诊断'),
           Card(
-            child: ListTile(
-              leading: const Icon(Icons.phone_iphone),
-              title: const Text('尝试获取本机号码'),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.bug_report_outlined),
+                  title: const Text('查看上次崩溃日志'),
+                  subtitle: const Text('异常退出时记录的堆栈，可复制后反馈给开发者'),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: _showLastCrash,
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: const Icon(Icons.phone_iphone),
+                  title: const Text('尝试获取本机号码'),
               subtitle: Text(
                 _line1Note ??
                     '读取 SIM/电话线路号码（双卡/CDMA 常为空，供排查）',
                 style: const TextStyle(fontSize: 12),
               ),
-              trailing: _line1Busy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.play_circle_outline, size: 20),
-              onTap: _line1Busy ? null : _tryLine1,
+                  trailing: _line1Busy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.play_circle_outline, size: 20),
+                  onTap: _line1Busy ? null : _tryLine1,
+                ),
+              ],
             ),
           ),
         ],

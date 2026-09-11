@@ -11,6 +11,15 @@ class CallerIdStatus {
   final bool readCallLog;
   final bool notifications;
   final bool? fullScreenOk; // null=非 Android
+
+  /// 是否已授予「显示在其他应用上层」（亮屏时也能直接拉起名片页的兜底权限）。
+  final bool overlayOk;
+
+  /// 是否已取得「来电筛选」角色（响铃瞬间即可拿到号码，名片最快）。
+  final bool screeningRoleHeld;
+
+  /// 本机是否可申请该角色。
+  final bool screeningRoleAvailable;
   final bool lookupExists;
   final int lookupCount; // -1 = 文件损坏读取失败
   final bool eventRecorded;
@@ -25,6 +34,9 @@ class CallerIdStatus {
     required this.readCallLog,
     required this.notifications,
     this.fullScreenOk,
+    this.overlayOk = false,
+    this.screeningRoleHeld = false,
+    this.screeningRoleAvailable = false,
     required this.lookupExists,
     required this.lookupCount,
     required this.eventRecorded,
@@ -45,6 +57,9 @@ class CallerIdStatus {
       readCallLog: b('readCallLog'),
       notifications: b('notifications'),
       fullScreenOk: ok is bool ? ok : null,
+      overlayOk: b('overlayOk'),
+      screeningRoleHeld: b('screeningRoleHeld'),
+      screeningRoleAvailable: b('screeningRoleAvailable'),
       lookupExists: b('lookupExists'),
       lookupCount: m['lookupCount'] is num ? (m['lookupCount'] as num).toInt() : 0,
       eventRecorded: b('eventRecorded'),
@@ -168,7 +183,43 @@ class CallerIdSync {
   /// 打开系统通知设置页（含“全屏提醒”开关，Android 14+）。
   static Future<void> openFullScreenSettings() => _invoke('openFullScreenSettings');
 
-  /// 直达系统设置页：app=应用详情 / battery=电池优化 / notification=通知设置。
+  /// 上次崩溃的堆栈（无则 null）。真机上排障用，不需 adb。
+  static Future<String?> lastCrash() async {
+    final r = await _invoke('lastCrash');
+    return r is String && r.isNotEmpty ? r : null;
+  }
+
+  /// 清除上次崩溃记录。
+  static Future<void> clearCrash() => _invoke('clearCrash');
+
+  /// 申请「来电筛选」角色（系统弹框），返回是否已取得。
+  static Future<bool> requestScreeningRole() async =>
+      await _invoke('requestScreeningRole') == true;
+
+  /// 取一次「通知点击带来的启动路由」（如 caller_id_settings），取走即清空；无则 null。
+  /// 用于 App 未在运行时（冷启动）的场景。
+  static Future<String?> consumePendingRoute() async {
+    final r = await _invoke('consumePendingRoute');
+    return r is String && r.isNotEmpty ? r : null;
+  }
+
+  /// App 已在运行时，原生推来的路由回调（如点常驻通知）。
+  static void Function(String route)? onRoute;
+
+  /// 注册/注销原生推来的路由回调（首页挂载时注册，卸载时清空）。
+  static void setRouteHandler(void Function(String route)? handler) {
+    onRoute = handler;
+    _channel.setMethodCallHandler(handler == null
+        ? null
+        : (call) async {
+            if (call.method == 'onRoute' && call.arguments is String) {
+              onRoute?.call(call.arguments as String);
+            }
+            return null;
+          });
+  }
+
+  /// 直达系统设置页：app=应用详情 / battery=电池优化 / notification=通知设置 / overlay=显示在其他应用上层。
   static Future<void> openSettings(String target) =>
       _invoke('openSettings', {'target': target});
 

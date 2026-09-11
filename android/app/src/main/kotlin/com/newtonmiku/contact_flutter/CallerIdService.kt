@@ -41,13 +41,22 @@ class CallerIdService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        ensureChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // 后台启动前台服务在 Android 12+ 可能不被允许（ForegroundServiceStartNotAllowedException）。
+        // 这里必须兜住：否则异常会让「服务创建失败」升级成主线程 FATAL、整个进程崩溃，
+        // 再叠加 START_STICKY 被系统反复拉起，就变成“屡次闪退”的循环。
+        try {
+            ensureChannel()
+            startForeground(NOTIFICATION_ID, buildNotification())
+        } catch (e: Exception) {
+            // 不允许就安静退出；需要时常驻会由 MainActivity.onResume 在前台重新拉起。
+            runCatching { stopSelf() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 被杀后尽量由系统重建，继续保活。
-        return START_STICKY
+        // 不用 START_STICKY：系统会在后台重建服务，而那时不允许 startForeground，
+        // 会反复触发上面的异常路径。改为需要时由 App 在前台（onResume）自行拉起。
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -69,20 +78,30 @@ class CallerIdService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        // 点击通知：直接打开「来电显示」设置页（关常驻的开关就在那一页），而不是只回首页。
         val open = Intent(this, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_ROUTE, MainActivity.ROUTE_CALLER_ID_SETTINGS)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pi = PendingIntent.getActivity(
             this, 0, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        // 通知上的「关闭常驻」按钮：一键停服务并关掉开关（显式广播给本应用的接收器）。
+        val stop = PendingIntent.getBroadcast(
+            this, 1,
+            Intent(this, CallerIdReceiver::class.java)
+                .setAction(CallerId.ACTION_STOP_KEEPALIVE),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_call)
             .setContentTitle("来电名片运行中")
-            .setContentText("保持后台常驻，来电时才能及时弹出名片（可在来电显示设置中关闭）")
+            .setContentText("点击可打开「来电显示」设置关闭本常驻通知")
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pi)
+            .addAction(0, "关闭常驻", stop)
             .build()
     }
 }

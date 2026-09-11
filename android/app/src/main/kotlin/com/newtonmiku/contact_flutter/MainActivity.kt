@@ -2,6 +2,8 @@ package com.newtonmiku.contact_flutter
 
 import android.Manifest
 import android.content.ContentProviderOperation
+import android.app.role.RoleManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.ContactsContract
@@ -12,20 +14,35 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
-    private companion object {
+    // 对外可见：CallerIdService 构造通知跳转时需要下面的常量
+    companion object {
         const val CHANNEL = "com.newtonmiku.contact_flutter/contacts"
         const val CALLER_ID_CHANNEL = "com.newtonmiku.contact_flutter/caller_id"
+
+        /** 启动路由 extra：常驻通知点击后直达对应页面。 */
+        const val EXTRA_ROUTE = "route"
+        const val ROUTE_CALLER_ID_SETTINGS = "caller_id_settings"
         private const val PERMISSION_REQ = 4101
         private const val PERMISSION_REQ_NUMBER = 4102
+        private const val REQUEST_SCREENING_ROLE = 4103
     }
 
     // 来电显示运行时权限请求的回调（requestPermissions 是异步的）
     private var callerIdPermissionResult: MethodChannel.Result? = null
     // 「读取本机号码」权限请求回调（激活页自动填号用）
     private var numberPermissionResult: MethodChannel.Result? = null
+    // 「来电筛选」角色申请回调
+    private var screeningRoleResult: MethodChannel.Result? = null
+
+    // 由通知点击等带来的启动路由（Flutter 端取走后清空）
+    private var pendingRoute: String? = null
+
+    // 来电显示通道引用：App 已在运行时，改用「原生推、Dart 收」把路由发过去
+    private var callerIdChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        pendingRoute = intent?.getStringExtra(EXTRA_ROUTE)
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -45,10 +62,12 @@ class MainActivity : FlutterFragmentActivity() {
         }
 
         // 来电显示：Flutter 推联系人快照；原生在响铃时直读文件匹配。
-        MethodChannel(
+        val callerId = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CALLER_ID_CHANNEL
-        ).setMethodCallHandler { call, result ->
+        )
+        callerIdChannel = callerId
+        callerId.setMethodCallHandler { call, result ->
             when (call.method) {
                 "replaceContacts" -> {
                     @Suppress("UNCHECKED_CAST")
@@ -126,6 +145,39 @@ class MainActivity : FlutterFragmentActivity() {
                     result.success(true)
                 }
                 "line1Number" -> result.success(line1Number())
+                // Flutter 启动后取一次「通知点击带来的路由」，取走即清空。
+                // 来电筛选角色：申请后回调返回是否已取得
+                "requestScreeningRole" -> {
+                    if (CallerId.hasScreeningRole(this)) {
+                        result.success(true)
+                        return@setMethodCallHandler
+                    }
+                    if (Build.VERSION.SDK_INT < 29 || !CallerId.screeningRoleAvailable(this)) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+                    screeningRoleResult = result
+                    val rm = getSystemService(RoleManager::class.java)
+                    runCatching {
+                        startActivityForResult(
+                            rm.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
+                            REQUEST_SCREENING_ROLE
+                        )
+                    }.onFailure {
+                        screeningRoleResult = null
+                        result.success(false)
+                    }
+                }
+                "lastCrash" -> result.success(PhonebookApp.readLastCrash(this))
+                "clearCrash" -> {
+                    PhonebookApp.clearLastCrash(this)
+                    result.success(true)
+                }
+                "consumePendingRoute" -> {
+                    val r = pendingRoute
+                    pendingRoute = null
+                    result.success(r)
+                }
                 "requestNumberPermission" -> {
                     numberPermissionResult = result
                     val perms = ArrayList<String>().apply {
@@ -220,6 +272,27 @@ class MainActivity : FlutterFragmentActivity() {
         // 回到前台时若开着来电显示且允许常驻，补拉一次保活服务（系统重启/被杀后可恢复）。
         if (CallerId.isEnabled(this) && CallerId.isKeepAlive(this)) {
             runCatching { CallerIdService.start(this) }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQUEST_SCREENING_ROLE) {
+            screeningRoleResult?.success(CallerId.hasScreeningRole(this))
+            screeningRoleResult = null
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val route = intent.getStringExtra(EXTRA_ROUTE)
+        pendingRoute = route
+        // App 已在运行（singleTop）：Flutter 不会重走启动流程，直接推给它。
+        if (route != null) {
+            pendingRoute = null
+            callerIdChannel?.invokeMethod("onRoute", route)
         }
     }
 

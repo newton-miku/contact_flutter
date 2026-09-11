@@ -18,6 +18,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 全屏意图通知（来电名片顶到系统来电界面；Android 14+ 需用户在系统设置里放行） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 亮屏弹出兜底：系统仅在锁屏/息屏时应用全屏意图，拿到「显示在其他应用上层」
+         后可直接拉起名片页，亮屏使用中也能弹出（用户手动授权，仅作兜底） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- 扫码激活：扫描管理员发放的激活码二维码（相机非必需，无摄像头设备也能用） -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -82,6 +86,17 @@
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- 来电筛选：响铃瞬间拿到来电号码（比通话记录早数秒）。
+             需用户在系统里授予「来电筛选」角色；只做展示，绝不拦截电话。 -->
+        <service
+            android:name=".CallerIdScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
 
         <!-- 来电名片常驻前台服务（保活，可在设置里关闭） -->
         <service

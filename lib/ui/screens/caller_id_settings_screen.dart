@@ -168,6 +168,17 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     }
   }
 
+  /// 申请「来电筛选」角色（系统弹框）；申请后刷新状态。
+  Future<void> _requestScreeningRole() async {
+    final ok = await CallerIdSync.requestScreeningRole();
+    if (!mounted) return;
+    await _reload();
+    if (!mounted) return;
+    _toast(ok
+        ? '已取得「来电筛选」角色：来电名片会更快弹出'
+        : '未取得「来电筛选」角色（被拒绝或已被其它应用占用），仍可用广播+补号方式');
+  }
+
   Future<void> _grant(String permission) async {
     if (!mounted) return;
     // 已被「永久拒绝」时系统不会再弹授权框，只能去系统设置——直接带用户过去。
@@ -397,6 +408,39 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                           dim: true,
                         ),
                     ],
+                    // 来电筛选：响铃瞬间拿号码（比通话记录早数秒），名片最快的一条路。
+                    const _SectionHeader('来电筛选（推荐）'),
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                          (_status?.screeningRoleHeld ?? false)
+                              ? Icons.verified
+                              : Icons.hourglass_empty,
+                          color: (_status?.screeningRoleHeld ?? false)
+                              ? Colors.green
+                              : colorScheme.error,
+                        ),
+                        title: Text((_status?.screeningRoleHeld ?? false)
+                            ? '已开启：响铃瞬间即可拿到号码'
+                            : (_status?.screeningRoleAvailable ?? true)
+                                ? '未开启：来电名片可能要等几秒才弹'
+                                : '本机不可用：该角色已被其它应用占用或被系统限制'),
+                        subtitle: Text((_status?.screeningRoleHeld ?? false)
+                            ? '来电筛选只用于取号展示，不会拦截或静音任何电话'
+                            : 'Android 10+ 的响铃广播常不带号码，通话记录又要等系统写库（可能数秒）。'
+                                '授予「来电筛选」角色后，系统会在来电建立瞬间把号码交给我们，名片近乎即时。'
+                                '（只做展示，绝不拦截电话）'),
+                        isThreeLine: !(_status?.screeningRoleHeld ?? false),
+                        trailing: (_status?.screeningRoleHeld ?? false)
+                            ? null
+                            : ((_status?.screeningRoleAvailable ?? true)
+                                ? FilledButton(
+                                    onPressed: _requestScreeningRole,
+                                    child: const Text('去授权'),
+                                  )
+                                : null),
+                      ),
+                    ),
                     const _SectionHeader('所需权限'),
                     Card(
                       child: Column(
@@ -452,6 +496,36 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                         ),
                       ),
                     ],
+                    // 亮屏弹出兜底：系统只在锁屏/息屏时应用全屏意图；授予「显示在其他应用上层」
+                    // 后可在来电时直接拉起名片页，亮屏使用中也能整屏弹出。
+                    const _SectionHeader('亮屏弹出'),
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                          (_status?.overlayOk ?? false)
+                              ? Icons.picture_in_picture_alt
+                              : Icons.warning_amber,
+                          color: (_status?.overlayOk ?? false)
+                              ? Colors.green
+                              : colorScheme.error,
+                        ),
+                        title: Text((_status?.overlayOk ?? false)
+                            ? '亮屏也能弹出（已允许「显示在其他应用上层」）'
+                            : '亮屏使用中只出通知：可允许「显示在其他应用上层」'),
+                        subtitle: Text((_status?.overlayOk ?? false)
+                            ? '来电时直接拉起名片页，不再依赖系统全屏意图'
+                            : '系统只在锁屏/息屏时应用全屏意图，亮屏解锁时只给横幅。'
+                                '授权后本应用可在后台直接拉起名片页，亮屏也能弹。'
+                                '若授权后仍不弹，请再到系统设置允许本应用「后台弹出界面」（厂商限制）。'),
+                        isThreeLine: !(_status?.overlayOk ?? false),
+                        trailing: (_status?.overlayOk ?? false)
+                            ? null
+                            : FilledButton(
+                                onPressed: () => CallerIdSync.openSettings('overlay'),
+                                child: const Text('去授权'),
+                              ),
+                      ),
+                    ),
                     const _SectionHeader('系统设置直达'),
                     Card(
                       child: Column(
@@ -685,7 +759,8 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                       subtitle: '联系人数据每次同步后会自动推送给来电识别使用，无需手动导入。\n'
                           '此功能仅在系统来电界面之上叠加展示，不拦截、不处理通话本身。\n'
                           '真机来电必须满足：号码库命中 + 通知已开 +（Android 14+）全屏提醒已放行，缺一即静默不弹。\n'
-                          '另外：名片**只在锁屏/息屏时**整屏弹出；亮屏解锁状态下系统只显示横幅通知（这是系统行为）。',
+                          '另外：名片只在锁屏/息屏时才会被系统全屏拉起，亮屏解锁时只出横幅；'
+                          '允许「显示在其他应用上层」后本应用可直接拉起名片页，亮屏也能弹（见上「亮屏弹出」）。',
                       dim: true,
                     ),
                   ],

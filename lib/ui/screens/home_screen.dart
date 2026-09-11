@@ -8,6 +8,7 @@ import '../../data/models/contact.dart';
 import '../../data/providers/contacts_provider.dart';
 import '../../services/biometric_auth.dart';
 import '../../services/contacts_exporter.dart';
+import '../../services/caller_id_sync.dart';
 import '../../services/device_auth.dart';
 import '../../services/pinyin_search.dart';
 import '../widgets/avatar.dart';
@@ -35,10 +36,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     Future.microtask(() => ref.read(contactsProvider.notifier).load());
+    _openPendingRoute();
+    CallerIdSync.setRouteHandler(_gotoRoute);
+  }
+
+  /// 常驻通知被点击时会带路由过来（caller_id_settings）：
+  /// 冷启动走 consumePendingRoute，App 已在运行时由原生推 onRoute。
+  Future<void> _openPendingRoute() async {
+    final route = await CallerIdSync.consumePendingRoute();
+    _gotoRoute(route);
+  }
+
+  void _gotoRoute(String? route) {
+    if (!mounted || route != 'caller_id_settings') return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CallerIdSettingsScreen()),
+    );
   }
 
   @override
   void dispose() {
+    CallerIdSync.setRouteHandler(null);
     _searchController.dispose();
     super.dispose();
   }
