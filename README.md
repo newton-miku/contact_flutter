@@ -89,7 +89,8 @@ APP_ID_SUFFIX=_demo flutter build apk --release ...   # → com.newtonmiku.conta
 
 | artifact | 内容 |
 |---|---|
-| `contact_flutter_apk` | `contact_flutter.apk`（arm）+ `contact_flutter_x86_64.apk`（x86_64） |
+| `contact_flutter_apk_arm` | `contact_flutter.apk`（armeabi-v7a + arm64-v8a） |
+| `contact_flutter_apk_x86_64` | `contact_flutter_x86_64.apk`（x86_64，模拟器用） |
 | `contact_flutter_windows_x64` | Windows x64 目录内容，解压即用 |
 
 打 tag（如 `v1.0.0`）推送时会额外创建 Release：`contact_flutter_v1.0.0.apk`、

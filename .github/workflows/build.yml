@@ -15,10 +15,9 @@
 #     变量/Environment，或用下方手动触发的 app_id_suffix 输入临时覆盖。
 #
 # 产物从 Actions 运行页下载（artifact 由 GitHub 打包，下载即一层 zip）：
-#   - contact_flutter_apk（内含两个 APK，均发布密钥签名，可覆盖安装）
-#       contact_flutter.apk        armeabi-v7a + arm64-v8a —— 默认分发用这个
-#       contact_flutter_x86_64.apk 仅 x86_64 —— 模拟器用
-#   - contact_flutter_windows_x64（Windows x64 目录内容，解压即用）
+#   - contact_flutter_apk_arm       contact_flutter.apk        armeabi-v7a + arm64-v8a，默认分发用这个
+#   - contact_flutter_apk_x86_64    contact_flutter_x86_64.apk 仅 x86_64，模拟器用
+#   - contact_flutter_windows_x64   Windows x64 目录内容，解压即用
 #
 # 打 tag（如 v1.0.0）并 push 时，会额外创建 GitHub Release：
 #   - contact_flutter_v1.0.0.apk / contact_flutter_v1.0.0_x86_64.apk（下载即装，零解压）
@@ -51,7 +50,7 @@ jobs:
     name: 静态检查与测试
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 钉 Flutter 版本：subosito 的缓存键里带版本号，钉住后 SDK 缓存不会因为 stable 通道
       # 前进而失效（否则会整包重下 SDK + 引擎产物）。升级 Flutter 时改这里，并保持与本机一致。
       - uses: subosito/flutter-action@v2
@@ -74,10 +73,10 @@ jobs:
       #   本地生成：bash tool/pack_signing.sh
       SIGNING_BUNDLE_BASE64: ${{ secrets.SIGNING_BUNDLE_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 显示本次应用包名后缀
         run: echo "APP_ID_SUFFIX='${APP_ID_SUFFIX}' → applicationId=com.newtonmiku.contact_flutter${APP_ID_SUFFIX}"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -92,13 +91,13 @@ jobs:
       # analyze/test 的 check 作业先占住（那份里没有 android 引擎产物），
       # 导致本作业每次启动都要重下几百 MB（实测约 3 分钟）。这里用自己的键单独缓存。
       - name: 缓存 Flutter 引擎产物（Android）
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.FLUTTER_ROOT }}/bin/cache/artifacts/engine
           key: flutter-engine-android-${{ runner.os }}-${{ steps.flutter.outputs.version }}
       # Gradle 依赖（发行版/AGP/Kotlin/插件 AAR）冷下载约占 5 分钟，一并缓存。
       - name: 缓存 Gradle 依赖
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -109,7 +108,7 @@ jobs:
       - run: flutter pub get
       # NDK/CMake 只有打包原生库(.so)时才用得到；命中缓存就不必再跑 sdkmanager（省约半分钟）。
       - name: 缓存 NDK / CMake
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ env.ANDROID_SDK_ROOT }}/ndk
@@ -185,10 +184,18 @@ jobs:
           [[ "$ARM" != *"x86_64"* ]] || { echo "::error::默认包不应含 x86_64（当前: $ARM）"; exit 1; }
           [[ "$X86" == "x86_64" ]] \
             || { echo "::error::x86_64 包只应含 x86_64（当前: ${X86:-空}）"; exit 1; }
-      - uses: actions/upload-artifact@v4
+      # 两个 APK 分开上传：只想要手机包的人不必连 x86_64 那份一起下。
+      - name: 上传默认包（arm + arm64）
+        uses: actions/upload-artifact@v7
         with:
-          name: contact_flutter_apk
-          path: dist-apk/
+          name: contact_flutter_apk_arm
+          path: dist-apk/contact_flutter.apk
+          if-no-files-found: error
+      - name: 上传 x86_64 包（模拟器用）
+        uses: actions/upload-artifact@v7
+        with:
+          name: contact_flutter_apk_x86_64
+          path: dist-apk/contact_flutter_x86_64.apk
           if-no-files-found: error
 
   build-windows:
@@ -198,7 +205,7 @@ jobs:
     env:
       API_BASE_URL: ${{ secrets.API_BASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 与 check 作业同一个 Flutter 版本（缓存键含版本号，钉住才有稳定缓存）
       - uses: subosito/flutter-action@v2
         id: flutter
@@ -208,7 +215,7 @@ jobs:
           cache: true
       # 同 Android 作业：单独缓存 Windows 引擎产物，避免每次都重下。
       - name: 缓存 Flutter 引擎产物（Windows）
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.FLUTTER_ROOT }}/bin/cache/artifacts/engine
           key: flutter-engine-windows-${{ runner.os }}-${{ steps.flutter.outputs.version }}
@@ -231,7 +238,7 @@ jobs:
             --dart-define="BUILD_TIME=$buildTime"
       # 直接上传构建目录：artifact 下载下来本身就是一个 zip（内含 exe 与 data/）。
       # 不再自己 Compress-Archive，否则会出现「zip 里套 zip」。
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: contact_flutter_windows_x64
           path: build/windows/x64/runner/Release/
@@ -249,7 +256,7 @@ jobs:
     permissions:
       contents: write # 创建 Release 需要
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist # 每个 artifact 解到 dist/<artifact 名>/
       - name: 组织产物（APK 原样 + Windows 单层 zip）
@@ -270,7 +277,7 @@ jobs:
           WIN_DIR=$(dirname "$EXE")
           ( cd "$WIN_DIR" && zip -qr "${GITHUB_WORKSPACE}/dist/contact_flutter_windows_x64_${TAG}.zip" . )
           ls -lh dist
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
