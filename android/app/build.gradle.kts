@@ -26,6 +26,9 @@ val hasReleaseSigning = keystoreProps.getProperty("storeFile") != null
 android {
     namespace = "com.newtonmiku.contact_flutter"
     compileSdk = flutter.compileSdkVersion
+    // NDK 版本必须钉定：本项目虽无 C/C++ 源码，但 mobile_scanner(ML Kit) 等插件带预编译 .so，
+    // AGP 打包时要用 NDK 里的 strip 工具处理它们，未配置会直接报 “NDK not configured”。
+    // CI 侧已加「接受 SDK 许可 + 缓存 NDK」两步，首次运行会自动下载。
     ndkVersion = "30.0.15729638"
 
     compileOptions {

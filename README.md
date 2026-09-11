@@ -4,7 +4,8 @@
 功能：按单位分组浏览 / 拼音搜索 / 一键呼叫与短信 / 导出到系统通讯录 / **安卓来电显示名片** /
 应用锁 / 设备激活（一次性激活码）与桌面端账号密码登录。
 
-配套后端：`phonebook-server`（Go + SQLite，含 Vue 管理页）。默认服务器 `https://你的服务器`。
+配套后端：`phonebook-server`（Go + SQLite，含 Vue 管理页）。
+**服务器地址不入库**：构建时由 CI/本地的 `API_BASE_URL` 注入（见「持续集成」）。
 
 ## 应用包名与「发布线」
 
@@ -105,7 +106,7 @@ keyPassword=******
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| `API_BASE_URL` | **Secret** | 后端地址，如 `https://你的服务器`；未配置则构建失败 |
+| `API_BASE_URL` | **Secret** | 后端地址（如 `https://your-server.example`）；未配置则构建失败 |
 | `APP_ID_SUFFIX` | **Variable** | 包名后缀，如 `_demo`；**未配置 = 默认线（无后缀）** |
 | `SIGNING_BUNDLE_BASE64` | **Secret** | 发布签名打包文件全文（`release.jks` + `key.properties` 的 tar.gz 再 base64），运行 `bash tool/pack_signing.sh` 生成 |
 
