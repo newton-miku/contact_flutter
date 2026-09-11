@@ -9,17 +9,19 @@
 #
 # 应用包名（安装身份）：com.newtonmiku.contact_flutter + 可选后缀
 #   - 不配置后缀 → com.newtonmiku.contact_flutter（默认线）
-#   - 配置后缀   → 例如 com.newtonmiku.contact_flutter_demo（自定义后缀）
+#   - 配置后缀   → 例如 com.newtonmiku.contact_flutter_demo
 #   配置位置：Settings → Secrets and variables → Actions → Variables → 新建 APP_ID_SUFFIX
-#     值填 _demo（注意带下划线）。不同分支要出不同发布线时，可给分支各自的
+#     值填 _demo（注意带下划线）。不同分支要出不同后缀时，可给分支各自的
 #     变量/Environment，或用下方手动触发的 app_id_suffix 输入临时覆盖。
 #
 # 产物从 Actions 运行页下载（artifact 由 GitHub 打包，下载即一层 zip）：
-#   - contact_flutter_apk（内含 app-release.apk，发布密钥签名，可覆盖安装）
+#   - contact_flutter_apk（内含两个 APK，均发布密钥签名，可覆盖安装）
+#       contact_flutter.apk        armeabi-v7a + arm64-v8a —— 默认分发用这个
+#       contact_flutter_x86_64.apk 仅 x86_64 —— 模拟器用
 #   - contact_flutter_windows_x64（Windows x64 目录内容，解压即用）
 #
 # 打 tag（如 v1.0.0）并 push 时，会额外创建 GitHub Release：
-#   - contact_flutter_v1.0.0.apk（下载即装，零解压）
+#   - contact_flutter_v1.0.0.apk / contact_flutter_v1.0.0_x86_64.apk（下载即装，零解压）
 #   - contact_flutter_windows_x64_v1.0.0.zip（单层 zip，解压即用）
 name: 客户端构建 (Android + Windows)
 
@@ -50,8 +52,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 钉 Flutter 版本：subosito 的缓存键里带版本号，钉住后 SDK 缓存不会因为 stable 通道
+      # 前进而失效（否则会整包重下 SDK + 引擎产物）。升级 Flutter 时改这里，并保持与本机一致。
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.8'
           channel: stable
           cache: true
       - run: flutter pub get
@@ -76,9 +81,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # 与 check 作业同一个 Flutter 版本（缓存键含版本号，钉住才有稳定缓存）
       - uses: subosito/flutter-action@v2
         id: flutter
         with:
+          flutter-version: '3.44.8'
           channel: stable
           cache: true
       # 引擎产物单独缓存：subosito 的缓存键按 Flutter 版本且**不可变**，容易被只跑
@@ -96,21 +103,28 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle.properties', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
       - run: flutter pub get
-      - name: 缓存 NDK（打包原生库需要；首次运行会下载，之后命中缓存）
+      # NDK/CMake 只有打包原生库(.so)时才用得到；命中缓存就不必再跑 sdkmanager（省约半分钟）。
+      - name: 缓存 NDK / CMake
         uses: actions/cache@v4
         with:
-          path: ${{ env.ANDROID_SDK_ROOT }}/ndk
-          key: ndk-30.0.15729638-${{ runner.os }}
-      - name: 接受 Android SDK 许可并安装 NDK/CMake
+          path: |
+            ${{ env.ANDROID_SDK_ROOT }}/ndk
+            ${{ env.ANDROID_SDK_ROOT }}/cmake
+          key: ndk-30.0.15729638-cmake-3.22.1-${{ runner.os }}
+      - name: 接受 Android SDK 许可并安装 NDK/CMake（已缓存则跳过）
         run: |
-          SM="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SM" --licenses > /dev/null || true
-          # 打包原生库(.so)需要 NDK；AGP 的原生配置步骤需要 CMake（版本与 AGP 期望一致）
-          "$SM" "ndk;30.0.15729638" "cmake;3.22.1" > /dev/null || true
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [[ -d "$SDK/ndk/30.0.15729638" && -d "$SDK/cmake/3.22.1" ]]; then
+            echo "NDK/CMake 已命中缓存，跳过 sdkmanager"
+          else
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+            # 打包原生库(.so)需要 NDK；AGP 的原生配置步骤需要 CMake（版本与 AGP 期望一致）
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.15729638" "cmake;3.22.1" > /dev/null || true
+          fi
       - name: 校验服务器地址（Secret API_BASE_URL）
         run: |
           if [[ -z "${API_BASE_URL}" ]]; then
@@ -125,22 +139,56 @@ jobs:
           fi
           echo "$SIGNING_BUNDLE_BASE64" | base64 -d | tar -xzf - -C android
           ls -l android/release.jks android/key.properties
-      - name: Build release APK
+      # ABI 拆分：两次构建，产物先落到 dist-apk/ 再上传（第二次会覆盖第一次的 app-release.apk）。
+      #   contact_flutter.apk         = armeabi-v7a + arm64-v8a（默认分发用）
+      #   contact_flutter_x86_64.apk  = 仅 x86_64（模拟器用，带后缀区分）
+      # 两次构建共用同一个 Gradle 守护进程与本地构建缓存，第二次主要是 x86_64 的 AOT 编译。
+      # abiFilters 由 android/app/build.gradle.kts 依据 flutter 传入的 -Ptarget-platform 设置，
+      # 否则插件自带的 x86_64 .so（ML Kit）会混进默认包。
+      - name: Build release APK（arm + arm64，默认包）
         run: |
           SHA_SHORT=${GITHUB_SHA::7}
           BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          flutter build apk --release \
+          mkdir -p dist-apk
+          flutter build apk --release --no-pub \
+            --target-platform android-arm,android-arm64 \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$SHA_SHORT" \
             --dart-define=BUILD_TIME="$BUILD_TIME"
-      - name: 校验签名证书（确认不是测试签名）
+          cp build/app/outputs/flutter-apk/app-release.apk dist-apk/contact_flutter.apk
+      - name: Build x86_64 APK（模拟器用）
         run: |
+          SHA_SHORT=${GITHUB_SHA::7}
+          BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          flutter build apk --release --no-pub \
+            --target-platform android-x64 \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$SHA_SHORT" \
+            --dart-define=BUILD_TIME="$BUILD_TIME"
+          cp build/app/outputs/flutter-apk/app-release.apk dist-apk/contact_flutter_x86_64.apk
+      - name: 校验签名与 ABI（确认拆分生效、不是测试签名）
+        run: |
+          set -euo pipefail
           BT=$(ls -d "${ANDROID_SDK_ROOT:-$ANDROID_HOME}"/build-tools/* | sort -V | tail -1)
-          "$BT/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | head -6
+          abis_of() { unzip -l "$1" | grep -o 'lib/[^/]*' | sed 's|lib/||' | sort -u | paste -sd, - || true; }
+          ls -lh dist-apk
+          for f in dist-apk/*.apk; do
+            echo "== $f"
+            "$BT/apksigner" verify --print-certs "$f" | head -3
+            echo "   ABI: $(abis_of "$f")"
+          done
+          ARM=$(abis_of dist-apk/contact_flutter.apk)
+          X86=$(abis_of dist-apk/contact_flutter_x86_64.apk)
+          for need in arm64-v8a armeabi-v7a; do
+            [[ "$ARM" == *"$need"* ]] || { echo "::error::默认包缺少 $need（当前: ${ARM:-空}）"; exit 1; }
+          done
+          [[ "$ARM" != *"x86_64"* ]] || { echo "::error::默认包不应含 x86_64（当前: $ARM）"; exit 1; }
+          [[ "$X86" == "x86_64" ]] \
+            || { echo "::error::x86_64 包只应含 x86_64（当前: ${X86:-空}）"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: contact_flutter_apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: dist-apk/
           if-no-files-found: error
 
   build-windows:
@@ -151,9 +199,11 @@ jobs:
       API_BASE_URL: ${{ secrets.API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
+      # 与 check 作业同一个 Flutter 版本（缓存键含版本号，钉住才有稳定缓存）
       - uses: subosito/flutter-action@v2
         id: flutter
         with:
+          flutter-version: '3.44.8'
           channel: stable
           cache: true
       # 同 Android 作业：单独缓存 Windows 引擎产物，避免每次都重下。
@@ -207,9 +257,13 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           # 不依赖 artifact 内的目录层级：直接找文件
-          APK=$(find dist -name "app-release.apk" | head -1)
-          [ -n "$APK" ] || { echo "::error::未找到 APK"; exit 1; }
-          cp "$APK" "dist/contact_flutter_${TAG}.apk"
+          APK_ARM=$(find dist -name "contact_flutter.apk" | head -1)
+          [ -n "$APK_ARM" ] || { echo "::error::未找到默认（arm+arm64）APK"; exit 1; }
+          cp "$APK_ARM" "dist/contact_flutter_${TAG}.apk"
+
+          APK_X86=$(find dist -name "contact_flutter_x86_64.apk" | head -1)
+          [ -n "$APK_X86" ] || { echo "::error::未找到 x86_64 APK"; exit 1; }
+          cp "$APK_X86" "dist/contact_flutter_${TAG}_x86_64.apk"
 
           EXE=$(find dist -name "contact_flutter.exe" | head -1)
           [ -n "$EXE" ] || { echo "::error::未找到 Windows 可执行文件"; exit 1; }
@@ -222,4 +276,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/contact_flutter_${{ github.ref_name }}.apk
+            dist/contact_flutter_${{ github.ref_name }}_x86_64.apk
             dist/contact_flutter_windows_x64_${{ github.ref_name }}.zip

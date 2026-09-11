@@ -5,116 +5,108 @@
 应用锁 / 设备激活（一次性激活码）与桌面端账号密码登录。
 
 配套后端：`phonebook-server`（Go + SQLite，含 Vue 管理页）。
-**服务器地址不入库**：构建时由 CI/本地的 `API_BASE_URL` 注入（见「持续集成」）。
-
-## 应用包名与「发布线」
-
-Android 的**安装身份**（`applicationId`）由「基础包名 + 可选后缀」拼成，后缀在**构建时**注入：
-
-| 场景 | applicationId |
-|---|---|
-| 未设置后缀（默认线） | `com.newtonmiku.contact_flutter` |
-| 设置 `APP_ID_SUFFIX=_demo`（自定义后缀） | `com.newtonmiku.contact_flutter_demo` |
-
-- 代码里的 Kotlin 包名 / `namespace` / MethodChannel 名固定为 `com.newtonmiku.contact_flutter`，
-  **不随后缀变化**（`namespace` 是编译期标识，与安装身份相互独立）。
-- 后缀由环境变量 `APP_ID_SUFFIX` 提供，`android/app/build.gradle.kts` 读取：
-  `applicationId = "com.newtonmiku.contact_flutter" + System.getenv("APP_ID_SUFFIX")`。
-
-> ⚠️ **后缀不同 = 设备上视为两个不同的 App**：不能互相覆盖安装，激活状态、应用锁密码、
-> 本地缓存都不通用。切换发布线时需要卸载重装，并重新用激活码激活。
+**服务器地址不入库**：构建时由 `API_BASE_URL` 注入（CI 用 Secret，见「持续集成」）。
 
 ## 本地构建
 
 ```bash
 flutter pub get
+```
 
-# Android（自定义后缀，发布用）
-APP_ID_SUFFIX=_demo flutter build apk --release \
+### Android APK
+
+用 `tool/build_apk.sh`：自动注入版本号与构建时间，按 ABI 拆包，产物落到 `../_release/`。
+
+```bash
+# 默认包：armeabi-v7a + arm64-v8a —— 手机装这个
+API_BASE_URL=https://你的服务器 bash tool/build_apk.sh
+
+# 顺带再出一个 x86_64 包（模拟器用，文件名带 _x86_64 后缀）
+API_BASE_URL=https://你的服务器 bash tool/build_apk.sh --x86
+```
+
+| 产物 | 含 ABI | 用途 |
+|---|---|---|
+| `_release/contact_flutter.apk` | armeabi-v7a + arm64-v8a | 手机分发（默认包） |
+| `_release/contact_flutter_x86_64.apk` | x86_64 | 模拟器（加 `--x86` 才有） |
+
+等价的手写命令：
+
+```bash
+flutter build apk --release --target-platform android-arm,android-arm64 \
   --dart-define=API_BASE_URL=https://你的服务器 \
   --dart-define=APP_VERSION=$(git rev-parse --short HEAD) \
-  --dart-define=BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  --dart-define=BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
-# Android（默认线，不带后缀）
-flutter build apk --release --dart-define=API_BASE_URL=https://你的服务器
+# 只含 x86_64 的包（产物同名 app-release.apk，自己拷出来改名）
+flutter build apk --release --target-platform android-x64 \
+  --dart-define=API_BASE_URL=https://你的服务器
+```
 
-# Windows 桌面端（包名后缀只影响 Android，桌面端无需该变量）
+> ABI 由 `--target-platform` 决定：`android/app/build.gradle.kts` 据此设置 `abiFilters`，
+> 默认包里不会混进第三方插件（ML Kit 等）的 x86_64 原生库。
+
+### Windows 桌面端
+
+```bash
 flutter build windows --release --dart-define=API_BASE_URL=https://你的服务器
 ```
 
-产物：`build/app/outputs/flutter-apk/app-release.apk`、`build/windows/x64/runner/Release/`。
+产物：`build/windows/x64/runner/Release/`。
 
-验证 APK 的安装身份：
+## 安装身份（applicationId）
+
+安装身份为 `com.newtonmiku.contact_flutter`，可用环境变量 `APP_ID_SUFFIX` 追加后缀（构建时注入）：
 
 ```bash
-aapt dump badging build/app/outputs/flutter-apk/app-release.apk | grep ^package
+APP_ID_SUFFIX=_demo flutter build apk --release ...   # → com.newtonmiku.contact_flutter_demo
 ```
+
+- 代码里的 Kotlin 包名 / `namespace` / MethodChannel 名固定为 `com.newtonmiku.contact_flutter`，不随后缀变化；
+- **后缀不同 = 设备上视为两个 App**：不能互相覆盖安装，激活状态、应用锁、本地缓存都不通用；
+- 核对产物的安装身份：`aapt dump badging <apk> | grep ^package`。
 
 ## 发布签名
 
-Android 正式包使用**固定的发布密钥**签名（不再用 Flutter 默认的 debug 测试签名），
-这样同一个 `applicationId` 的新版本可以直接**覆盖安装**，不会丢激活状态与本地数据。
+正式包用**固定的发布密钥**签名（不是 Flutter 默认的 debug 测试签名），
+因此同一个 `applicationId` 的新版本可以直接**覆盖安装**，不丢激活状态与本地数据。
 
 | 文件 | 位置 | 是否入库 |
 |---|---|---|
-| 密钥库 | `android/release.jks`（PKCS12） | ❌ 已 gitignore |
-| 签名配置 | `android/key.properties` | ❌ 已 gitignore |
+| 密钥库 | `android/release.jks` | ❌ 已 gitignore |
+| 签名配置 | `android/key.properties`（storeFile / storePassword / keyAlias / keyPassword） | ❌ 已 gitignore |
 
-`android/key.properties` 内容：
+- 本机打包自动读取 `android/key.properties` → 用发布密钥签名；
+- CI 用**单个 Secret** `SIGNING_BUNDLE_BASE64` 还原出这两个文件，本地用 `bash tool/pack_signing.sh` 生成；
+- **未配置时 release 打包会直接失败并提示**，绝不静默退回测试签名（debug 构建不受影响）。
 
-```properties
-storeFile=release.jks
-storePassword=******
-keyAlias=phonebook
-keyPassword=******
-```
-
-**规则**：
-
-- 本机打包自动读取该文件 → 用发布密钥签名；
-- CI 由 workflow 用**单个 Secret** `SIGNING_BUNDLE_BASE64` 还原出同样的两个文件；
-- 打包成一个文件（离线备份 + 填 Secret 用）：
-
-  ```bash
-  bash tool/pack_signing.sh          # 生成 ../_private/contact_flutter-signing.bundle
-  cat ../_private/contact_flutter-signing.bundle   # 全文本粘贴到 Secret
-  ```
-
-  该 bundle 就是密钥的全部：**把它和密码一起离线保存**（丢了就无法再发升级包）。
-- **未配置时 release 打包会直接失败并提示**，绝不会静默退回测试签名（debug 构建不受影响）。
-
-> ⚠️ **务必备份 `release.jks` 与两个密码**（建议存到密码管理器 + 离线副本）。
-> 密钥一旦丢失，**所有已装设备都无法再收到升级包**（只能卸载重装，且激活要重新发码）。
-> 证书指纹（SHA-256）：`4F:2C:68:5B:D9:DA:97:12:BB:26:61:DE:86:B1:F4:37:79:EC:91:3D:D9:3A:CA:9F:CF:4A:5C:D5:A6:66:D4:74`
-
-### 换签名密钥的正确做法（将来如果要换）
-
-不能直接换——签名不同 = 系统拒绝覆盖安装，必须卸载重装（丢数据）。
-若确实要换，走 **Play 应用签名 / 密钥轮换** 或对存量设备做一次「卸载重装」的过渡。
-
-### 首次安装与版本号
-
-- 因为 `applicationId` 曾调整过，**旧包要先卸载一次**；此后同 `applicationId` + 同密钥即可一路覆盖升级；
-- 每次发版建议递增 `pubspec.yaml` 的 `version`（`1.0.0+10000` 里的 `+10000` 即 versionCode，规则见文件注释）。
+> ⚠️ 密钥与两个密码务必离线备份：一旦丢失，所有已装设备都无法再收到升级包。
 
 ## 持续集成
 
 `.github/workflows/build.yml`：push 到 `main` 或手动触发时，先跑 `analyze` + `test`，
-再并行出 Android APK 与 Windows x64 包，产物在 Actions 运行页下载。
+再出 Android APK 与 Windows x64 包，产物在 Actions 运行页下载。
 
-需要在仓库里配置（Settings → Secrets and variables → Actions）：
+| artifact | 内容 |
+|---|---|
+| `contact_flutter_apk` | `contact_flutter.apk`（arm）+ `contact_flutter_x86_64.apk`（x86_64） |
+| `contact_flutter_windows_x64` | Windows x64 目录内容，解压即用 |
+
+打 tag（如 `v1.0.0`）推送时会额外创建 Release：`contact_flutter_v1.0.0.apk`、
+`contact_flutter_v1.0.0_x86_64.apk`、`contact_flutter_windows_x64_v1.0.0.zip`（均为单层，下载即用）。
+
+仓库需配置（Settings → Secrets and variables → Actions）：
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| `API_BASE_URL` | **Secret** | 后端地址（如 `https://your-server.example`）；未配置则构建失败 |
-| `APP_ID_SUFFIX` | **Variable** | 包名后缀，如 `_demo`；**未配置 = 默认线（无后缀）** |
-| `SIGNING_BUNDLE_BASE64` | **Secret** | 发布签名打包文件全文（`release.jks` + `key.properties` 的 tar.gz 再 base64），运行 `bash tool/pack_signing.sh` 生成 |
+| `API_BASE_URL` | **Secret** | 后端地址；未配置则构建失败 |
+| `SIGNING_BUNDLE_BASE64` | **Secret** | 发布签名打包文件全文（`bash tool/pack_signing.sh` 生成） |
+| `APP_ID_SUFFIX` | **Variable** | 可选，安装身份后缀；未配置 = 无后缀 |
 
-不同分支要出不同发布线时：给分支配置各自的变量/Environment，或手动触发时在
-`app_id_suffix` 输入框里临时指定（该输入优先于仓库变量）。
+Flutter 版本在 workflow 里钉定（`3.44.8`），升级时改那里并保持与本机一致。
 
-## 相关
+## 客户端数据同步
 
-- 客户端本地存储：`shared_preferences`（设备令牌、应用锁、设置）+ 原生 `contacts_lookup.json`（来电匹配号码库）。
-- 手机端登录：一次性激活码（扫码或手输）；桌面端登录：账号密码。
-- 文档见上层目录 `docs/`；服务端与部署见 `../phonebook-server`、`../deploy`。
+- 启动 / 下拉刷新先展示**本地缓存**，再请求轻量接口 `GET /api/version`（几十字节）；
+- 版本号一致 → 直接用缓存；不一致 → 拉 `GET /api/contacts` 全量（gzip）并写回缓存；
+- 连不上服务器 → 回退本地缓存并在标题栏标注「离线」。

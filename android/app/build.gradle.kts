@@ -7,10 +7,28 @@ plugins {
 }
 
 // 应用安装身份：默认 com.newtonmiku.contact_flutter；用环境变量 APP_ID_SUFFIX 追加发布线后缀。
-//   - 本地/示例打包：APP_ID_SUFFIX=_demo flutter build apk ...
+//   - 打带后缀的包：APP_ID_SUFFIX=_demo flutter build apk ...
 //   - GitHub Actions：仓库 Variables 配 APP_ID_SUFFIX（未配 = 无后缀），见 .github/workflows/build.yml
 // 注意：applicationId 不同 = 设备上视为不同 App，无法互相覆盖安装（激活状态不通用）。
 val appIdSuffix = System.getenv("APP_ID_SUFFIX") ?: ""
+
+// ABI 拆分：默认包只含 arm（armeabi-v7a + arm64-v8a），x86_64 单独出一个带后缀的包。
+//   - 默认：flutter build apk --release --target-platform android-arm,android-arm64
+//   - x86 ：flutter build apk --release --target-platform android-x64   → 文件名加 _x86_64
+// 为什么要在这里改 abiFilters：Flutter 的 Gradle 插件会把 abiFilters 固定设为「全量三个 ABI」，
+// 于是即使 --target-platform 只选了两个，插件自带的第三方 .so（ML Kit 等）里的 x86_64 仍会被打进包，
+// 默认包白白变大（且装了也会因缺 libflutter.so 而崩）。改成跟着 -Ptarget-platform 走才是真拆分。
+// 未传 -Ptarget-platform 时（IDE / 裸 gradle）保持插件默认的全量 ABI。
+val abiByPlatform = mapOf(
+    "android-arm" to "armeabi-v7a",
+    "android-arm64" to "arm64-v8a",
+    "android-x64" to "x86_64",
+)
+val targetAbis: List<String> = (project.findProperty("target-platform") as String?)
+    ?.split(',')
+    ?.mapNotNull { abiByPlatform[it.trim()] }
+    ?.distinct()
+    .orEmpty()
 
 // 发布签名：从 android/key.properties 读取（该文件与 keystore 都在 .gitignore 里，不入库）。
 // 本机由开发者放置；CI 由 workflow 用 Secrets 生成同名文件。
@@ -44,6 +62,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 见文件顶部「ABI 拆分」：按 -Ptarget-platform 覆盖插件默认的全量 abiFilters。
+        if (targetAbis.isNotEmpty()) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(targetAbis)
+            }
+        }
     }
 
     signingConfigs {
