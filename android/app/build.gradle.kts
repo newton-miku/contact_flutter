@@ -4,8 +4,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// 应用安装身份：默认 com.newtonmiku.contact_flutter；用环境变量 APP_ID_SUFFIX 追加发布线后缀。
+//   - 本地/示例打包：APP_ID_SUFFIX=_demo flutter build apk ...
+//   - GitHub Actions：仓库 Variables 配 APP_ID_SUFFIX（未配 = 无后缀），见 .github/workflows/build.yml
+// 注意：applicationId 不同 = 设备上视为不同 App，无法互相覆盖安装（激活状态不通用）。
+val appIdSuffix = System.getenv("APP_ID_SUFFIX") ?: ""
+
 android {
-    namespace = "com.example.contact_importer_flutter"
+    namespace = "com.newtonmiku.contact_flutter"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "30.0.15729638"
 
@@ -15,8 +21,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.contact_importer_flutter"
+        applicationId = "com.newtonmiku.contact_flutter" + appIdSuffix
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26

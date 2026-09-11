@@ -1,8 +1,9 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.app.Application
 import android.content.IntentFilter
 import android.telephony.TelephonyManager
+import androidx.core.content.ContextCompat
 
 /**
  * 应用 Application：
@@ -19,7 +20,11 @@ class PhonebookApp : Application() {
         super.onCreate()
         try {
             val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
-            registerReceiver(CallerIdReceiver(), filter)
+            // 只用系统广播时 Android 14+ 并不强制声明导出性，这里显式声明以求一致与安全：
+            // 只接受系统（与自身）投递的 PHONE_STATE。
+            ContextCompat.registerReceiver(
+                this, CallerIdReceiver(), filter, ContextCompat.RECEIVER_NOT_EXPORTED
+            )
         } catch (_: Exception) {
             // 注册失败（极端情况）不阻塞启动，仍有 manifest 静态接收器可用
         }

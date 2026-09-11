@@ -93,6 +93,16 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     });
   }
 
+  /// 关键权限缺失项数（电话状态 / 通话记录 / 通知），用于顶部引导卡。
+  int get _missingCount {
+    if (_loading || !_enabled) return 0;
+    var n = 0;
+    if (!(_perms['readPhoneState'] ?? false)) n++;
+    if (!(_perms['readCallLog'] ?? false)) n++;
+    if (!(_perms['notifications'] ?? false)) n++;
+    return n;
+  }
+
   Future<void> _onToggle(bool on) async {
     if (!on) {
       await CallerIdSync.setEnabled(false);
@@ -108,15 +118,36 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
 
     final notif = _perms['notifications'] ?? false;
     final callLog = _perms['readCallLog'] ?? false;
+    final phone = _perms['readPhoneState'] ?? false;
     if (!notif) {
-      _toast(
-        '通知权限被拒绝：来电名片将无法弹出。请在系统设置中开启通知。',
-        openSettings: true,
-      );
-    } else if (!callLog) {
-      _toast('未授予“电话/通话记录”：Android 10+ 会读不到来电号码，名片可能不显示。',
-          openSettings: true);
+      await _askOpenSettings('通知权限未授予：来电名片无法弹出。',
+          target: 'notification');
+    } else if (!callLog || !phone) {
+      await _askOpenSettings('「电话 / 通话记录」权限未授予：Android 10+ 会读不到来电号码，名片无法显示。');
     }
+  }
+
+  /// 权限拿不到时的引导：确认后【直接跳转】对应系统设置页，不再只给一个按钮让用户自己找。
+  Future<void> _askOpenSettings(String message, {String target = 'app'}) async {
+    if (!mounted) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber, size: 36),
+        title: const Text('还需要授权'),
+        content: Text('$message\n\n点「去系统设置」直接打开对应页面；开启后返回本页会自动刷新状态。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('稍后')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('去系统设置'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await CallerIdSync.openSettings(target);
+    if (mounted) _toast('已打开系统设置，开启权限后返回即可');
   }
 
   Future<void> _onToggleKeepAlive(bool on) async {
@@ -139,18 +170,27 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
 
   Future<void> _grant(String permission) async {
     if (!mounted) return;
-    if (permission == 'notifications' &&
-        (await ph.Permission.notification.status).isPermanentlyDenied) {
-      _toast('通知权限已被系统永久拒绝，请到系统设置中手动开启', openSettings: true);
+    // 已被「永久拒绝」时系统不会再弹授权框，只能去系统设置——直接带用户过去。
+    final notifDenied = permission == 'notifications' &&
+        (await ph.Permission.notification.status).isPermanentlyDenied;
+    final phoneDenied = (await ph.Permission.phone.status).isPermanentlyDenied;
+    if (notifDenied || phoneDenied) {
+      final target = notifDenied ? 'notification' : 'app';
+      _toast(notifDenied ? '通知权限已被拒绝，已为你打开通知设置' : '电话权限已被拒绝，已为你打开应用设置');
+      await CallerIdSync.openSettings(target);
       return;
     }
-    if ((await ph.Permission.phone.status).isPermanentlyDenied) {
-      _toast('电话/通话记录权限已被系统永久拒绝，请到系统设置中手动开启', openSettings: true);
-      return;
-    }
+
     _perms = await CallerIdSync.requestPermissions();
     if (!mounted) return;
     await _reload();
+    if (!mounted) return;
+    // 申请后仍未授予：多半是被拒绝且不再弹框，直接引导去系统设置。
+    if (!(_perms['readPhoneState'] ?? false) || !(_perms['readCallLog'] ?? false)) {
+      await _askOpenSettings('「电话 / 通话记录」权限未授予，来电将读不到号码。');
+    } else if (!(_perms['notifications'] ?? false)) {
+      await _askOpenSettings('通知权限未授予，来电名片无法弹出。', target: 'notification');
+    }
   }
 
   void _toast(String msg, {bool openSettings = false}) {
@@ -312,6 +352,14 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                       title: '来电自动显示名片',
                       subtitle: '当通讯录里的人来电时，全屏弹出名片显示姓名、单位与职务；陌生号码不打扰。',
                     ),
+                    if (_missingCount > 0) ...[
+                      const SizedBox(height: 12),
+                      _PermissionBanner(
+                        missingCount: _missingCount,
+                        onGrantAll: () => _grant('phone'),
+                        onOpenSettings: () => CallerIdSync.openSettings('app'),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Card(
                       child: SwitchListTile(
@@ -384,12 +432,17 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                             _fullScreenOk! ? Icons.fullscreen : Icons.warning_amber,
                             color: _fullScreenOk! ? Colors.green : colorScheme.error,
                           ),
-                          title: Text(_fullScreenOk! ? '全屏提醒已可用' : '需在系统设置开启全屏提醒'),
+                          title: Text(_fullScreenOk!
+                              ? '全屏提醒已授权'
+                              : '未授权「全屏提醒」：来电只会出通知，不弹全屏名片'),
                           subtitle: Text(
                             _fullScreenOk!
-                                ? '来电名片可以直接全屏弹出'
-                                : 'Android 14+ 要求应用在系统通知设置里单独授予“全屏提醒”（这是系统限制，需手动开启一次）',
+                                ? '锁屏或息屏时来电会整屏弹出名片'
+                                : 'Android 14+ 把「全屏提醒」列为特殊应用权限，默认不授予。\n'
+                                    '开关位置：设置 → 应用 → 特殊应用权限 → 全屏通知 → 本应用。\n'
+                                    '（「通知设置」里没有这个开关，必须走上面这个入口）',
                           ),
+                          isThreeLine: !_fullScreenOk!,
                           trailing: _fullScreenOk!
                               ? null
                               : const FilledButton(
@@ -399,6 +452,36 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                         ),
                       ),
                     ],
+                    const _SectionHeader('系统设置直达'),
+                    Card(
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.settings_applications_outlined),
+                            title: const Text('应用详情页'),
+                            subtitle: const Text('权限、通知、后台运行等开关都在这页'),
+                            trailing: const Icon(Icons.open_in_new, size: 18),
+                            onTap: () => CallerIdSync.openSettings('app'),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const Icon(Icons.battery_saver_outlined),
+                            title: const Text('电池优化白名单'),
+                            subtitle: const Text('把本应用设为「不优化」，避免后台被系统冻结'),
+                            trailing: const Icon(Icons.open_in_new, size: 18),
+                            onTap: () => CallerIdSync.openSettings('battery'),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const Icon(Icons.notifications_active_outlined),
+                            title: const Text('通知设置'),
+                            subtitle: const Text('开启通知与「全屏提醒」（Android 14+）'),
+                            trailing: const Icon(Icons.open_in_new, size: 18),
+                            onTap: () => CallerIdSync.openSettings('notification'),
+                          ),
+                        ],
+                      ),
+                    ),
                     const _SectionHeader('测试与预览'),
                     const _TipCard(
                       icon: Icons.science_outlined,
@@ -552,14 +635,47 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                       ),
                     ),
                     if (_status != null && !_status!.eventRecorded)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: _TipCard(
-                          icon: Icons.warning_amber,
-                          title: '一直收不到广播？多半是系统/厂商后台限制',
-                          subtitle: '请用另一台手机给本机拨号一次，再回来看这行。若仍显示“无记录”，说明系统没有把来电事件交给本 App：'
-                              '请在系统设置中允许本 App「自启动 / 后台运行」，并把电池策略设为不限制。\n'
-                              '（若开启开关前弹过“允许应用在后台启动活动吗？”，请选择允许。）',
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(
+                                  children: [
+                                    Icon(Icons.warning_amber, size: 20),
+                                    SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text('一直收不到广播？多半是系统/厂商后台限制',
+                                          style: TextStyle(fontWeight: FontWeight.w600)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  '请用另一台手机给本机拨号一次，再回来看这行。若仍显示“无记录”，说明系统没有把来电事件交给本 App：'
+                                  '请允许本 App「自启动 / 后台运行」，并把电池策略设为不限制。\n'
+                                  '（若开启开关前弹过“允许应用在后台启动活动吗？”，请选择允许。）',
+                                  style: TextStyle(fontSize: 13, height: 1.5),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    TextButton(
+                                      onPressed: () => CallerIdSync.openSettings('app'),
+                                      child: const Text('打开应用设置'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => CallerIdSync.openSettings('battery'),
+                                      child: const Text('电池优化白名单'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     const SizedBox(height: 12),
@@ -568,7 +684,8 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                       title: '小贴士',
                       subtitle: '联系人数据每次同步后会自动推送给来电识别使用，无需手动导入。\n'
                           '此功能仅在系统来电界面之上叠加展示，不拦截、不处理通话本身。\n'
-                          '真机来电必须满足：号码库命中 + 通知已开 +（Android 14+）全屏提醒已放行，缺一即静默不弹。',
+                          '真机来电必须满足：号码库命中 + 通知已开 +（Android 14+）全屏提醒已放行，缺一即静默不弹。\n'
+                          '另外：名片**只在锁屏/息屏时**整屏弹出；亮屏解锁状态下系统只显示横幅通知（这是系统行为）。',
                       dim: true,
                     ),
                   ],
@@ -847,6 +964,59 @@ class _TipCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 关键权限缺失时的顶部引导卡：一键授权 + 直达系统设置。
+class _PermissionBanner extends StatelessWidget {
+  final int missingCount;
+  final VoidCallback onGrantAll;
+  final VoidCallback onOpenSettings;
+  const _PermissionBanner({
+    required this.missingCount,
+    required this.onGrantAll,
+    required this.onOpenSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Card(
+      color: colorScheme.errorContainer.withValues(alpha: 0.5),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.error_outline, size: 20, color: colorScheme.error),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('还缺 $missingCount 项权限，来电名片无法弹出',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '需要「电话状态 / 通话记录」取号、「通知」展示名片。点「一键授权」按系统提示允许即可；'
+              '若之前选过“拒绝”，系统不再弹框，请走「去系统设置」。',
+              style: TextStyle(fontSize: 12, height: 1.5),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(onPressed: onOpenSettings, child: const Text('去系统设置')),
+                const SizedBox(width: 6),
+                FilledButton(onPressed: onGrantAll, child: const Text('一键授权')),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

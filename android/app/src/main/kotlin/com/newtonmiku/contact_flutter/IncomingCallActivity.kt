@@ -1,4 +1,4 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 
 /**
  * 全屏来电名片（由 setFullScreenIntent 拉起，锁屏也能整屏显示）。
@@ -108,7 +109,15 @@ class IncomingCallActivity : Activity() {
         // 若此刻注销就再也收不到「接通/挂断」，卡片会残留。故监听保持到 onDestroy 才解绑。
         val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
         filter.addAction(CallerId.ACTION_DISMISS_CARD)
-        registerReceiver(phoneStateReceiver, filter)
+        // Android 14(API 34)+ 起：过滤器里含「非系统广播」（ACTION_DISMISS_CARD 是本应用自定义的）
+        // 时，注册必须显式声明导出性，否则抛 SecurityException，页面刚起来就崩（表现为名片闪退）。
+        // 这里用 NOT_EXPORTED：关闭广播只由本应用（setPackage 指定自己）与系统投递。
+        // 注册失败也不让名片崩掉（退化为需手动关闭，总好过闪退）。
+        runCatching {
+            ContextCompat.registerReceiver(
+                this, phoneStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
     }
 
     override fun onDestroy() {

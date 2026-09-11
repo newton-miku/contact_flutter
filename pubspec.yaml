@@ -1,4 +1,4 @@
-name: contact_importer_flutter
+name: contact_flutter
 description: 现代式通讯录应用，支持打电话、发短信、导出联系人到系统通讯录。
 publish_to: 'none'
 # 产品版本(versionName) + versionCode。

@@ -4,13 +4,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:contact_importer_flutter/data/cache/contacts_cache.dart';
-import 'package:contact_importer_flutter/data/models/contact.dart';
-import 'package:contact_importer_flutter/data/providers/contacts_provider.dart';
-import 'package:contact_importer_flutter/data/remote/contact_api.dart';
-import 'package:contact_importer_flutter/main.dart';
-import 'package:contact_importer_flutter/services/app_lock.dart';
-import 'package:contact_importer_flutter/services/device_auth.dart';
+import 'package:contact_flutter/data/cache/contacts_cache.dart';
+import 'package:contact_flutter/data/models/contact.dart';
+import 'package:contact_flutter/data/providers/contacts_provider.dart';
+import 'package:contact_flutter/data/remote/contact_api.dart';
+import 'package:contact_flutter/main.dart';
+import 'package:contact_flutter/services/app_lock.dart';
+import 'package:contact_flutter/services/device_auth.dart';
 
 const _sample = RemoteContact(
   id: '1',
@@ -85,7 +85,7 @@ void main() {
           deviceAuthProvider.overrideWith((ref) => DeviceAuthNotifier(
               loadPersistence: false, initialToken: 'test-token', initialPhone: '13800000000')),
         ],
-        child: const ContactImporterApp(),
+        child: const ContactsApp(),
       ),
     );
 
@@ -116,7 +116,7 @@ void main() {
           deviceAuthProvider.overrideWith((ref) => DeviceAuthNotifier(
               loadPersistence: false, initialToken: 'test-token', initialPhone: '13800000000')),
         ],
-        child: const ContactImporterApp(),
+        child: const ContactsApp(),
       ),
     );
     await tester.pumpAndSettle();

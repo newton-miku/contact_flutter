@@ -5,11 +5,11 @@ import 'ui/screens/app_root.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: ContactImporterApp()));
+  runApp(const ProviderScope(child: ContactsApp()));
 }
 
-class ContactImporterApp extends StatelessWidget {
-  const ContactImporterApp({super.key});
+class ContactsApp extends StatelessWidget {
+  const ContactsApp({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,6 @@
 {
-    "name": "contact_importer_flutter",
-    "short_name": "contact_importer_flutter",
+    "name": "contact_flutter",
+    "short_name": "contact_flutter",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

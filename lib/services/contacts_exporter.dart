@@ -3,7 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../data/models/contact.dart';
 
-const _channel = MethodChannel('com.example.contact_importer_flutter/contacts');
+const _channel = MethodChannel('com.newtonmiku.contact_flutter/contacts');
 
 /// 导出联系人到系统通讯录。
 ///

@@ -1,4 +1,4 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.Manifest
 import android.content.ContentProviderOperation
@@ -13,8 +13,8 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private companion object {
-        const val CHANNEL = "com.example.contact_importer_flutter/contacts"
-        const val CALLER_ID_CHANNEL = "com.example.contact_importer_flutter/caller_id"
+        const val CHANNEL = "com.newtonmiku.contact_flutter/contacts"
+        const val CALLER_ID_CHANNEL = "com.newtonmiku.contact_flutter/caller_id"
         private const val PERMISSION_REQ = 4101
         private const val PERMISSION_REQ_NUMBER = 4102
     }
@@ -105,6 +105,10 @@ class MainActivity : FlutterFragmentActivity() {
                 "canUseFullScreen" -> result.success(CallerId.canUseFullScreen(this))
                 "openFullScreenSettings" -> {
                     CallerId.openFullScreenSettings(this)
+                    result.success(true)
+                }
+                "openSettings" -> {
+                    CallerId.openSystemSettings(this, call.argument<String>("target").orEmpty())
                     result.success(true)
                 }
                 "status" -> result.success(CallerId.status(this))

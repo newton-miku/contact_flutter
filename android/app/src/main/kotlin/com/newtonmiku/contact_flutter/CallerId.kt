@@ -1,4 +1,4 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.Manifest
 import android.app.Notification
@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
@@ -28,7 +29,7 @@ import java.util.LinkedHashSet
 object CallerId {
     const val CHANNEL_ID = "incoming_calls"
     const val NOTIFICATION_ID = 0xC011 // "call-id"
-    const val ACTION_DISMISS_CARD = "com.example.contact_importer_flutter.ACTION_DISMISS_CARD"
+    const val ACTION_DISMISS_CARD = "com.newtonmiku.contact_flutter.ACTION_DISMISS_CARD"
     private const val PREFS = "caller_id_prefs"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_KEEP_ALIVE = "keep_alive"
@@ -105,12 +106,50 @@ object CallerId {
         return nm.canUseFullScreenIntent()
     }
 
+    /**
+     * 直达系统设置页（权限引导用）：
+     *   app          → 本应用详情页（权限、通知、后台等入口都在这）
+     *   battery      → 电池优化白名单列表（厂商自启/后台限制多在此调整）
+     *   notification → 本应用通知设置页
+     * 不可用时回退到应用详情页，绝不抛异常。
+     */
+    fun openSystemSettings(c: Context, target: String) {
+        val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.fromParts("package", c.packageName, null))
+        val intent = when (target) {
+            "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            "notification" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+            else -> appDetails
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val ok = runCatching { c.startActivity(intent) }.isSuccess
+        if (!ok && target != "app") {
+            runCatching { c.startActivity(appDetails.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+    }
+
+    /**
+     * 打开「全屏提醒」授权页。
+     *
+     * Android 14(API 34)+ 起 USE_FULL_SCREEN_INTENT 变成「特殊应用权限」，**默认不授予**；
+     * 未授予时 setFullScreenIntent 会被系统静默降级成普通通知（来电只出通知、不弹全屏卡片）。
+     * 该开关**不在**通知渠道设置里，而在：设置 → 应用 → 特殊应用权限 → 全屏通知
+     * （即 ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT，需带 EXTRA_APP_PACKAGE）。
+     * 老系统/该页不可用时回退到通知渠道设置页。
+     */
     fun openFullScreenSettings(c: Context) {
-        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+        val channel = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
             .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        c.startActivity(intent)
+        if (Build.VERSION.SDK_INT >= 34) {
+            val fsi = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                .setData(Uri.fromParts("package", c.packageName, null))
+                .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
+            if (runCatching { c.startActivity(fsi.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) {
+                return
+            }
+        }
+        runCatching { c.startActivity(channel.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
     // ---------- 查找缓存（Flutter 推送；原生响铃直读） ----------

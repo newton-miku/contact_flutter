@@ -1,4 +1,4 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.Manifest
 import android.content.BroadcastReceiver

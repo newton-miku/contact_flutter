@@ -90,7 +90,7 @@ class CallerIdSync {
   CallerIdSync._();
 
   static const MethodChannel _channel =
-      MethodChannel('com.example.contact_importer_flutter/caller_id');
+      MethodChannel('com.newtonmiku.contact_flutter/caller_id');
 
   /// 推送联系人供原生来电匹配（含号码为空时的清空）。
   /// v6：同一个人有 手机/座机/传真 多个号码时，按号码拆成多条下发（号码全量去重），
@@ -167,6 +167,10 @@ class CallerIdSync {
 
   /// 打开系统通知设置页（含“全屏提醒”开关，Android 14+）。
   static Future<void> openFullScreenSettings() => _invoke('openFullScreenSettings');
+
+  /// 直达系统设置页：app=应用详情 / battery=电池优化 / notification=通知设置。
+  static Future<void> openSettings(String target) =>
+      _invoke('openSettings', {'target': target});
 
   /// 运行状态（权限 / 号码库 / 最近一次来电广播事件），用于诊断“开了没反应”。
   static Future<CallerIdStatus> status() async =>

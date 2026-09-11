@@ -1,4 +1,4 @@
-package com.example.contact_importer_flutter
+package com.newtonmiku.contact_flutter
 
 import android.app.Notification
 import android.app.NotificationChannel
