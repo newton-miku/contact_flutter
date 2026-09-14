@@ -256,6 +256,12 @@ jobs:
     permissions:
       contents: write # 创建 Release 需要
     steps:
+      # 完整历史：gen_release_notes.sh 要找"上一个 tag"并跨 tag 比对提交
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: 生成 Release 说明（按提交前缀分组）
+        run: bash tool/gen_release_notes.sh > release_notes.md
       - uses: actions/download-artifact@v8
         with:
           path: dist # 每个 artifact 解到 dist/<artifact 名>/
@@ -280,7 +286,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: release_notes.md
           files: |
             dist/contact_flutter_${{ github.ref_name }}.apk
             dist/contact_flutter_${{ github.ref_name }}_x86_64.apk
