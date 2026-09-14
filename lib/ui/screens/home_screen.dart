@@ -32,6 +32,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // 导出模式：仅在此模式下才可勾选联系人并导出。默认浏览态 = 点击查看详情/复制/拨打。
   bool _exportMode = false;
 
+  /// 手机端（Android/iOS）：来电名片、应用锁、生物认证这些都依赖手机能力。
+  /// 桌面端（Linux/Windows）没有这些能力，对应入口一律不展示。
+  static bool get _mobile =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
   @override
   void initState() {
     super.initState();
@@ -48,7 +54,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _gotoRoute(String? route) {
-    if (!mounted || route != 'caller_id_settings') return;
+    // 来电显示设置页依赖 Android 的通知/来电能力，桌面端不处理该路由。
+    if (!mounted || !_mobile || route != 'caller_id_settings') return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CallerIdSettingsScreen()),
     );
@@ -155,8 +162,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     }
                   },
                   itemBuilder: (_) => [
-                    // 应用锁（Windows 桌面版不提供解锁要求，不显示）
-                    if (defaultTargetPlatform != TargetPlatform.windows) ...[
+                    // 应用锁（依赖生物认证/密码锁屏，仅手机端提供）
+                    if (_mobile) ...[
                       const PopupMenuItem(
                         value: _MenuAction.appLock,
                         child: Row(
@@ -169,40 +176,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       const PopupMenuDivider(),
                     ],
-                    // 来电显示（Android 全屏名片）
-                    const PopupMenuItem(
-                      value: _MenuAction.callerId,
-                      child: Row(
-                        children: [
-                          Icon(Icons.phone_in_talk, size: 20),
-                          SizedBox(width: 12),
-                          Text('来电显示'),
-                        ],
+                    // 来电显示（Android 全屏名片 + 来电筛选角色，仅手机端）
+                    if (_mobile) ...[
+                      const PopupMenuItem(
+                        value: _MenuAction.callerId,
+                        child: Row(
+                          children: [
+                            Icon(Icons.phone_in_talk, size: 20),
+                            SizedBox(width: 12),
+                            Text('来电显示'),
+                          ],
+                        ),
                       ),
-                    ),
-                    const PopupMenuDivider(),
-                    // 导出：进入「导出模式」后才可勾选联系人
-                    PopupMenuItem(
-                      value: _MenuAction.export,
-                      child: Row(
-                        children: [
-                          const Icon(Icons.person_add_outlined, size: 20),
-                          const SizedBox(width: 12),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('导出到系统通讯录…'),
-                              Text(
-                                '进入选择模式 · 需生物认证',
-                                style: theme.textTheme.labelSmall
-                                    ?.copyWith(color: colorScheme.outline),
-                              ),
-                            ],
-                          ),
-                        ],
+                      const PopupMenuDivider(),
+                    ],
+                    // 导出：进入「导出模式」后才可勾选联系人。
+                    // 导出调的是 Android 原生通道（MethodChannel .../contacts），
+                    // 桌面端没有该实现，故仅手机端提供此入口。
+                    if (_mobile) ...[
+                      PopupMenuItem(
+                        value: _MenuAction.export,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_add_outlined, size: 20),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('导出到系统通讯录…'),
+                                Text(
+                                  '进入选择模式 · 需生物认证',
+                                  style: theme.textTheme.labelSmall
+                                      ?.copyWith(color: colorScheme.outline),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const PopupMenuDivider(),
+                      const PopupMenuDivider(),
+                    ],
                     // 检查更新
                     const PopupMenuItem(
                       value: _MenuAction.checkUpdate,
