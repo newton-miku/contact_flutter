@@ -89,7 +89,7 @@ APP_ID_SUFFIX=_demo flutter build apk --release ...   # → com.newtonmiku.conta
 
 | artifact | 内容 |
 |---|---|
-| `contact_flutter_apk_arm` | `contact_flutter.apk`（armeabi-v7a + arm64-v8a） |
+| `contact_flutter_apk` | `contact_flutter.apk`（armeabi-v7a + arm64-v8a，手机默认装这个） |
 | `contact_flutter_apk_x86_64` | `contact_flutter_x86_64.apk`（x86_64，模拟器用） |
 | `contact_flutter_windows_x64` | Windows x64 目录内容，解压即用 |
 

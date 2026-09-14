@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
 
@@ -168,15 +169,110 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     }
   }
 
+  /// 无电脑时给用户抄的命令（可用「另一台手机 + 无线调试」执行）。
+  static const String _roleAdbCommand =
+      'adb shell cmd role set-bypassing-role-qualification true\n'
+      'adb shell cmd role add-role-holder --user 0 '
+      'android.app.role.CALL_SCREENING com.newtonmiku.contact_flutter_shiquan';
+
+  Future<void> _copyRoleAdbCommand() async {
+    await Clipboard.setData(const ClipboardData(text: _roleAdbCommand));
+    if (!mounted) return;
+    _toast('已复制授权命令');
+  }
+
   /// 申请「来电筛选」角色（系统弹框）；申请后刷新状态。
+  ///
+  /// 已知问题：部分荣耀 MagicOS 10 / Android 16 机型上，系统那个角色弹框点「确定」会
+  /// 崩在系统进程（permissioncontroller 的 NullPointerException: parameter current），
+  /// 弹框直接消失、角色拿不到，而且系统侧不会给应用任何异常。检测到这种情况时，
+  /// 不再让用户反复点，直接给可执行的替代方案。
   Future<void> _requestScreeningRole() async {
-    final ok = await CallerIdSync.requestScreeningRole();
+    final res = await CallerIdSync.requestScreeningRole();
     if (!mounted) return;
     await _reload();
     if (!mounted) return;
-    _toast(ok
-        ? '已取得「来电筛选」角色：来电名片会更快弹出'
-        : '未取得「来电筛选」角色（被拒绝或已被其它应用占用），仍可用广播+补号方式');
+
+    if (res.held) {
+      _toast('已取得「来电筛选」角色：来电名片会更快弹出');
+      return;
+    }
+    if (res.dialogCrashed) {
+      await _showScreeningRoleUnsupportedByRomDialog();
+      return;
+    }
+    _toast(res.reason == 'unavailable'
+        ? '本机不提供「来电筛选」角色（被其它应用占用或被系统限制）'
+        : '未取得「来电筛选」角色，仍在用广播+补号方式取号');
+  }
+
+  /// 系统角色界面崩溃时的说明与替代路径（本 ROM 上无法通过界面授权）。
+  Future<void> _showScreeningRoleUnsupportedByRomDialog() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.report_problem_outlined),
+        title: const Text('系统弹框自己崩了'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '点「确定」的瞬间，是系统的「默认应用」界面崩了，不是本应用的问题：\n'
+                'com.android.permissioncontroller 抛了 NullPointerException，'
+                '所以弹框会突然消失、角色也拿不到。',
+                style: TextStyle(height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              const Text('可用以下任一方式：',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              const Text(
+                '1. 先不管它：广播 + 补号的取号方式仍然可用，只是名片可能晚几秒。\n'
+                '2. 用另一台手机开「无线调试」连过来，执行下面的命令（一次性）：',
+                style: TextStyle(height: 1.5),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(_roleAdbCommand,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12, height: 1.5)),
+              ),
+              const SizedBox(height: 8),
+              const Text('授予后回来刷新本页即可看到「已开启」。',
+                  style: TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('知道了'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop(false);
+              await _copyRoleAdbCommand();
+            },
+            child: const Text('复制命令'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('去开无线调试'),
+          ),
+        ],
+      ),
+    );
+    if (go == true) {
+      await CallerIdSync.openWirelessDebugging();
+    }
   }
 
   Future<void> _grant(String permission) async {
@@ -199,6 +295,8 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     // 申请后仍未授予：多半是被拒绝且不再弹框，直接引导去系统设置。
     if (!(_perms['readPhoneState'] ?? false) || !(_perms['readCallLog'] ?? false)) {
       await _askOpenSettings('「电话 / 通话记录」权限未授予，来电将读不到号码。');
+    } else if (!(_perms['readContacts'] ?? false)) {
+      await _askOpenSettings('「读取联系人」权限未授予，来电只能拿到号码、匹配不出是谁。');
     } else if (!(_perms['notifications'] ?? false)) {
       await _askOpenSettings('通知权限未授予，来电名片无法弹出。', target: 'notification');
     }
@@ -441,6 +539,32 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                                 : null),
                       ),
                     ),
+                    // 部分荣耀 MagicOS 10 机型：系统角色弹框点「确定」必崩在系统进程，
+                    // 界面授权这条路走不通，直接把可用命令摆出来，别让用户反复点。
+                    if (_android && !(_status?.screeningRoleHeld ?? false))
+                      _TipCard(
+                        icon: Icons.info_outline,
+                        title: '若点「确定」后弹框突然消失',
+                        subtitle: '那是荣耀系统的「默认应用」界面崩了'
+                            '（com.android.permissioncontroller 报 NullPointerException），'
+                            '不是本应用的问题，且系统不会产生本应用的崩溃记录。\n'
+                            '此时用另一台手机开「无线调试」连过来执行下面命令即可（一次性）：\n'
+                            '$_roleAdbCommand',
+                        trailing: IconButton(
+                          tooltip: '复制命令',
+                          icon: const Icon(Icons.copy_all),
+                          onPressed: _copyRoleAdbCommand,
+                        ),
+                      ),
+                    if (_android &&
+                        (_status?.screeningRoleHeld ?? false) &&
+                        !(_status?.readContacts ?? true))
+                      const _TipCard(
+                        icon: Icons.warning_amber_rounded,
+                        title: '「读取联系人」未授权',
+                        subtitle: '来电筛选已经能拿到号码了，但没有通讯录权限就匹配不出是谁，'
+                            '名片不会显示内容。请在下方「所需权限」里补上。',
+                      ),
                     const _SectionHeader('所需权限'),
                     Card(
                       child: Column(
@@ -456,6 +580,13 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                             title: '电话/通话记录',
                             subtitle: 'Android 10+ 出于隐私限制，须此权限才能取得来电号码',
                             granted: _perms['readCallLog'] ?? false,
+                            onGrant: () => _grant('phone'),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          _PermTile(
+                            title: '读取联系人',
+                            subtitle: '拿到来电号码后匹配出是谁；缺它则只能拿到号码、弹不出内容',
+                            granted: _status?.readContacts ?? false,
                             onGrant: () => _grant('phone'),
                           ),
                           const Divider(height: 1, indent: 16, endIndent: 16),
@@ -1002,8 +1133,13 @@ class _TipCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool dim;
+  final Widget? trailing;
   const _TipCard(
-      {required this.icon, required this.title, required this.subtitle, this.dim = false});
+      {required this.icon,
+      required this.title,
+      required this.subtitle,
+      this.dim = false,
+      this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -1038,6 +1174,10 @@ class _TipCard extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            trailing!,
+          ],
         ],
       ),
     );

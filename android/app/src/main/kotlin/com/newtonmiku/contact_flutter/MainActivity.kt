@@ -33,6 +33,10 @@ class MainActivity : FlutterFragmentActivity() {
     private var numberPermissionResult: MethodChannel.Result? = null
     // 「来电筛选」角色申请回调
     private var screeningRoleResult: MethodChannel.Result? = null
+    // 是否成功把系统角色弹框拉起来了。用于区分「用户自己取消」和「系统弹框异常」。
+    // 已知问题：部分荣耀 MagicOS 10 机型上 permissioncontroller 的角色界面点「确定」会
+    // 抛 NullPointerException 崩在系统进程（parameter current），弹框直接消失、角色不生效。
+    private var screeningRoleDialogShown = false
 
     // 由通知点击等带来的启动路由（Flutter 端取走后清空）
     private var pendingRoute: String? = null
@@ -115,6 +119,8 @@ class MainActivity : FlutterFragmentActivity() {
                             add(Manifest.permission.READ_PHONE_NUMBERS)
                         }
                         add(Manifest.permission.READ_CALL_LOG)
+                        // 来电筛选/广播只负责「拿到号码」；匹配名片内容要读通讯录。
+                        add(Manifest.permission.READ_CONTACTS)
                         if (Build.VERSION.SDK_INT >= 33) {
                             add(Manifest.permission.POST_NOTIFICATIONS)
                         }
@@ -149,23 +155,26 @@ class MainActivity : FlutterFragmentActivity() {
                 // 来电筛选角色：申请后回调返回是否已取得
                 "requestScreeningRole" -> {
                     if (CallerId.hasScreeningRole(this)) {
-                        result.success(true)
+                        result.success(mapOf("held" to true))
                         return@setMethodCallHandler
                     }
                     if (Build.VERSION.SDK_INT < 29 || !CallerId.screeningRoleAvailable(this)) {
-                        result.success(false)
+                        result.success(mapOf("held" to false, "reason" to "unavailable"))
                         return@setMethodCallHandler
                     }
                     screeningRoleResult = result
+                    screeningRoleDialogShown = false
                     val rm = getSystemService(RoleManager::class.java)
                     runCatching {
                         startActivityForResult(
                             rm.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
                             REQUEST_SCREENING_ROLE
                         )
+                    }.onSuccess {
+                        screeningRoleDialogShown = true
                     }.onFailure {
                         screeningRoleResult = null
-                        result.success(false)
+                        result.success(mapOf("held" to false, "reason" to "launch_failed"))
                     }
                 }
                 "lastCrash" -> result.success(PhonebookApp.readLastCrash(this))
@@ -197,6 +206,7 @@ class MainActivity : FlutterFragmentActivity() {
         "readPhoneState" to CallerId.granted(this, Manifest.permission.READ_PHONE_STATE),
         "readPhoneNumbers" to (Build.VERSION.SDK_INT < 26 || CallerId.granted(this, Manifest.permission.READ_PHONE_NUMBERS)),
         "readCallLog" to CallerId.granted(this, Manifest.permission.READ_CALL_LOG),
+        "readContacts" to CallerId.granted(this, Manifest.permission.READ_CONTACTS),
         "notifications" to CallerId.canPostNotifications(this),
     )
 
@@ -277,7 +287,16 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_SCREENING_ROLE) {
-            screeningRoleResult?.success(CallerId.hasScreeningRole(this))
+            val held = CallerId.hasScreeningRole(this)
+            val reason = when {
+                held -> "granted"
+                // 弹框确实起来了、用户也点了/界面自己消失了，但角色没拿到：
+                // 在荣耀 MagicOS 10 上就是系统角色界面崩了（permissioncontroller NPE）。
+                screeningRoleDialogShown && resultCode == RESULT_OK -> "dialog_crashed"
+                else -> "cancelled"
+            }
+            screeningRoleDialogShown = false
+            screeningRoleResult?.success(mapOf("held" to held, "reason" to reason))
             screeningRoleResult = null
             return
         }

@@ -126,8 +126,16 @@ object CallerId {
                 .putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName)
             "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
                 .setData(Uri.fromParts("package", c.packageName, null))
+            // 无电脑时授权「来电筛选」角色要用 adb：这里是「无线调试」页的入口。
+            // Android 11+ 才有该页；打不开就回退到开发者选项（再不行回退应用详情页）。
+            "wireless_debugging" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
             else -> appDetails
         }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (target == "wireless_debugging" && Build.VERSION.SDK_INT >= 30) {
+            val wd = Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { c.startActivity(wd) }.isSuccess) return
+        }
         val ok = runCatching { c.startActivity(intent) }.isSuccess
         if (!ok && target != "app") {
             runCatching { c.startActivity(appDetails.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -462,6 +470,7 @@ object CallerId {
             "overlayOk" to canDrawOverlays(c),
             "screeningRoleHeld" to hasScreeningRole(c),
             "screeningRoleAvailable" to screeningRoleAvailable(c),
+            "readContacts" to granted(c, Manifest.permission.READ_CONTACTS),
             "lookupExists" to f.exists(),
             "lookupCount" to count,
             "eventRecorded" to (ev != null),

@@ -4,6 +4,25 @@ import 'package:flutter/services.dart';
 
 import '../data/models/contact.dart';
 
+/// 「来电筛选」角色申请的结果。
+class ScreeningRoleRequest {
+  final bool held;
+
+  /// granted / dialog_crashed / cancelled / unavailable / launch_failed
+  final String reason;
+
+  const ScreeningRoleRequest({required this.held, this.reason = ''});
+
+  /// 系统弹框被拉起来了但角色没拿到 —— 典型就是本 ROM 的系统 UI 崩溃。
+  bool get dialogCrashed => !held && reason == 'dialog_crashed';
+
+  static ScreeningRoleRequest fromMap(Map<Object?, Object?> m) =>
+      ScreeningRoleRequest(
+        held: m['held'] == true,
+        reason: '${m['reason'] ?? ''}',
+      );
+}
+
 /// 原生来电识别运行状态（诊断用，一次取回）。
 class CallerIdStatus {
   final bool enabled;
@@ -20,6 +39,10 @@ class CallerIdStatus {
 
   /// 本机是否可申请该角色。
   final bool screeningRoleAvailable;
+
+  /// 是否已授予「读取联系人」。拿到来电号码后要靠它匹配出名片内容；
+  /// 未授予时角色即便生效，也只能拿到号码、匹配不到人。
+  final bool readContacts;
   final bool lookupExists;
   final int lookupCount; // -1 = 文件损坏读取失败
   final bool eventRecorded;
@@ -37,6 +60,7 @@ class CallerIdStatus {
     this.overlayOk = false,
     this.screeningRoleHeld = false,
     this.screeningRoleAvailable = false,
+    this.readContacts = true,
     required this.lookupExists,
     required this.lookupCount,
     required this.eventRecorded,
@@ -60,6 +84,8 @@ class CallerIdStatus {
       overlayOk: b('overlayOk'),
       screeningRoleHeld: b('screeningRoleHeld'),
       screeningRoleAvailable: b('screeningRoleAvailable'),
+      // 缺字段时按「已授予」处理，避免旧原生实现误报缺权限。
+      readContacts: m.containsKey('readContacts') ? b('readContacts') : true,
       lookupExists: b('lookupExists'),
       lookupCount: m['lookupCount'] is num ? (m['lookupCount'] as num).toInt() : 0,
       eventRecorded: b('eventRecorded'),
@@ -192,9 +218,29 @@ class CallerIdSync {
   /// 清除上次崩溃记录。
   static Future<void> clearCrash() => _invoke('clearCrash');
 
-  /// 申请「来电筛选」角色（系统弹框），返回是否已取得。
-  static Future<bool> requestScreeningRole() async =>
-      await _invoke('requestScreeningRole') == true;
+  /// 申请「来电筛选」角色（拉起系统弹框），返回结果详情。
+  ///
+  /// 注意：部分荣耀 MagicOS 10 / Android 16 机型上，系统那个角色弹框
+  /// （com.android.permissioncontroller 的 RequestRoleActivity）点「确定」会崩在
+  /// 系统进程里（NullPointerException: parameter current），弹框直接消失。
+  /// 因此不能只看"用户是否点了确定"，必须用 [ScreeningRoleRequest.reason] 区分：
+  ///   granted        已取得
+  ///   dialog_crashed 系统弹框异常退出（本 ROM 的已知问题，见 README）
+  ///   cancelled      用户取消了
+  ///   unavailable    本机该角色不可用
+  ///   launch_failed  压根没能拉起系统弹框
+  static Future<ScreeningRoleRequest> requestScreeningRole() async {
+    final r = await _invoke('requestScreeningRole');
+    if (r is Map) {
+      return ScreeningRoleRequest.fromMap(r);
+    }
+    // 兼容旧原生实现：直接返回 bool
+    return ScreeningRoleRequest(held: r == true);
+  }
+
+  /// 打开系统的「无线调试」页（无电脑时用另一台手机/adb 授权角色的入口）。
+  static Future<void> openWirelessDebugging() =>
+      _invoke('openSettings', {'target': 'wireless_debugging'});
 
   /// 取一次「通知点击带来的启动路由」（如 caller_id_settings），取走即清空；无则 null。
   /// 用于 App 未在运行时（冷启动）的场景。

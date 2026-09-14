@@ -188,7 +188,7 @@ jobs:
       - name: 上传默认包（arm + arm64）
         uses: actions/upload-artifact@v7
         with:
-          name: contact_flutter_apk_arm
+          name: contact_flutter_apk
           path: dist-apk/contact_flutter.apk
           if-no-files-found: error
       - name: 上传 x86_64 包（模拟器用）
