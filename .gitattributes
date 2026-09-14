@@ -1,6 +1,16 @@
 # 统一换行策略：入库存 LF
 * text=auto
 
+# 必须在 Linux 上执行的脚本：强制 LF。
+# 本仓库 core.autocrlf=true，若检出成 CRLF，Linux 下会报
+# "bad interpreter: /usr/bin/env bash^M" 而无法运行。
+*.sh text eol=lf
+packaging/linux/* text eol=lf
+# deb 元数据脚本没有扩展名，单独钉住
+packaging/linux/postinst text eol=lf
+packaging/linux/prerm text eol=lf
+packaging/linux/contact_flutter.launcher text eol=lf
+
 # 明确二进制
 *.png binary
 *.jpg binary

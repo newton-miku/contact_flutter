@@ -1,0 +1,22 @@
+#!/bin/sh
+# contact_flutter 启动包装脚本（随 deb 安装到 /opt/contact_flutter/contact_flutter）
+#
+# 为什么要包一层：
+#   1. Flutter 桌面版的 .so 放在 bundle 的 lib/ 下，用 $ORIGIN 相对路径加载；
+#      从桌面图标启动时工作目录不确定，这里显式补 LD_LIBRARY_PATH 更稳。
+#   2. 国产系统（UOS/麒麟）常见于虚拟机、国产 GPU 环境，GPU 驱动不一定完整；
+#      若出现白屏/黑屏，可设置 LIBGL_ALWAYS_SOFTWARE=1 走软件渲染（见 README）。
+#   3. 把命令行参数原样透传给应用。
+
+BUNDLE_DIR="/opt/contact_flutter"
+BIN="$BUNDLE_DIR/contact_flutter.bin"
+
+if [ ! -x "$BIN" ]; then
+  echo "contact_flutter: 未找到可执行文件 $BIN（安装可能不完整）" >&2
+  exit 1
+fi
+
+LD_LIBRARY_PATH="$BUNDLE_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH
+
+exec "$BIN" "$@"

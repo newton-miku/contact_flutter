@@ -54,6 +54,69 @@ flutter build windows --release --dart-define=API_BASE_URL=https://你的服务�
 
 产物：`build/windows/x64/runner/Release/`。
 
+### Linux 桌面端（UOS / 麒麟 / Debian 系，打 .deb）
+
+面向 UOS 等国产系统的 arm64 安装包，用 `tool/build_deb.sh` 一条命令出包：
+
+```bash
+# 在 Linux 上（arm64 机器上直接就是 arm64 包）
+API_BASE_URL=https://你的服务器 bash tool/build_deb.sh
+
+# 显式指定架构（必须与宿主一致，见下方限制）
+API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch arm64
+
+# 复用已有 build/linux 产物，只重新打包
+bash tool/build_deb.sh --skip-build
+```
+
+产物：`../_release/contact_flutter_<版本>_<arch>.deb`
+
+安装与卸载：
+
+```bash
+sudo dpkg -i contact_flutter_1.0.0+10000_arm64.deb || sudo apt-get -f install
+sudo dpkg -r contact-flutter        # 卸载（包名是 contact-flutter，不是文件名）
+```
+
+包内容：应用本体装到 `/opt/contact_flutter/`（自包含，Flutter 引擎与资源随包分发），
+桌面条目 `/usr/share/applications/contact_flutter.desktop`，图标装到
+`/usr/share/icons/hicolor/256x256/apps/`。系统级依赖只有 `libgtk-3-0`、`libblkid1`、`liblzma5`。
+
+构建依赖（脚本会自动检测并提示）：
+
+```bash
+sudo apt-get install -y libgtk-3-dev pkg-config cmake ninja-build clang
+```
+
+#### 两个必须知道的限制
+
+**1）不支持跨架构构建。** Flutter 的 Linux 桌面版是原生编译，没有 `--target-platform`
+这类开关，**无法从 Windows 或 x86_64 Linux 交叉编译出 arm64 包**。要出 UOS arm64 的 deb，
+必须满足其一：
+
+- 直接在 arm64 机器（UOS / 麒麟 / Debian arm64）上跑本脚本 —— 最省事，推荐；
+- 在开发机上以 arm64 容器/虚拟机原生构建，例如
+  `docker run --platform linux/arm64 -v "$PWD":/w -w /w <arm64-flutter镜像> bash tool/build_deb.sh`。
+
+脚本会比对 `--arch` 与宿主架构，不一致时直接报错退出，不会悄悄产出错误架构的包。
+
+**2）Linux 端有三个插件没有实现**，功能会降级（不会导致构建失败，但调用时会抛
+`MissingPluginException`）：
+
+| 插件 | Linux 支持 | 影响 |
+|---|---|---|
+| `url_launcher` | ✅ `url_launcher_linux` | 拨号/发短信/打开链接走系统默认应用，正常 |
+| `permission_handler` | ❌ | 权限申请页在 Linux 上不可用；运行时权限是 Android 概念 |
+| `local_auth` | ❌ | 生物识别解锁不可用（桌面端本来就不走应用锁） |
+| `mobile_scanner` | ❌ | 扫码页在 Linux 上不可用 |
+
+因此 Linux 桌面端实际可用的是：**账号密码登录 → 通讯录浏览/搜索 → 拨号（交给系统）→
+导出联系人**；与 Android 共用的来电名片、应用锁、扫码等入口在桌面端已由
+`defaultTargetPlatform` 判断屏蔽（见 `lib/ui/screens/app_root.dart`）。
+
+> 若在国产系统上启动后**白屏/黑屏**（常见于虚拟机、国产 GPU 驱动不完整），
+> 用软件渲染启动即可：`LIBGL_ALWAYS_SOFTWARE=1 contact_flutter`。
+
 ## 安装身份（applicationId）
 
 安装身份为 `com.newtonmiku.contact_flutter`，可用环境变量 `APP_ID_SUFFIX` 追加后缀（构建时注入）：

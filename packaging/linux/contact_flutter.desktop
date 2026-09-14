@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=通讯录
+Name[en]=Contacts
+Comment=现代式通讯录应用：来电名片、拨号、导出联系人
+Comment[en]=Modern contacts app: caller ID, dial, export contacts
+Exec=contact_flutter %U
+Icon=contact_flutter
+Terminal=false
+Categories=Utility;Office;ContactManagement;
+Keywords=contacts;phone;通讯录;名片;
+StartupNotify=true
+StartupWMClass=contact_flutter

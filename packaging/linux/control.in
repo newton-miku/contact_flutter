@@ -1,0 +1,12 @@
+Package: contact-flutter
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: phonebook <phonebook@local>
+Installed-Size: @SIZE@
+Depends: libgtk-3-0, libblkid1, liblzma5
+Description: 现代式通讯录应用（来电名片 / 通讯录同步 / 导出入系统通讯录）
+ Flutter 桌面版，支持打电话、发短信、导出联系人到系统通讯录。
+ 打包为自包含目录（/opt/contact_flutter），Flutter 引擎与资源随包分发，
+ 仅依赖系统 GTK3 运行库，适配 UOS / Debian 系 ARM64 与 AMD64。
