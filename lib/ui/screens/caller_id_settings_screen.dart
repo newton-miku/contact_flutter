@@ -241,8 +241,8 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                   color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: SelectableText(_roleAdbCommand,
-                    style: const TextStyle(
+                child: const SelectableText(_roleAdbCommand,
+                    style: TextStyle(
                         fontFamily: 'monospace', fontSize: 12, height: 1.5)),
               ),
               const SizedBox(height: 8),
