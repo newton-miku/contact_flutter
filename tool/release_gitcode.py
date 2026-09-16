@@ -41,6 +41,8 @@ App 端查询用的是【免鉴权】接口（实测可读）：
 
 import argparse
 import base64
+# 注意别名：本模块自己定义了 http()，直接用 `http.client` 会被那个函数遮住
+import http.client as httpclient
 import json
 import os
 import re
@@ -347,6 +349,58 @@ def _find_aapt2():
     return cands[-1][1]
 
 
+def put_signed(url, payload, headers, timeout):
+    """
+    把附件 PUT 到签名地址，分块发送并打印进度。
+
+    为什么不用 `urlopen(data=payload)` 一把梭：GitHub 的 runner 到
+    file.gitcode.com 是跨境链路，50MB 一次性写下去实测会
+    "The write operation timed out"（socket 写超时，不是服务端拒绝）。
+    之前用的第三方上传 action 也是同样下场——两边实现不同却都挂在这一步，
+    说明问题在网络路径本身，而不在客户端代码。
+
+    所以这里自己控制 socket：
+      - 超时放宽到分钟级（默认 1800s，可用 GITCODE_UPLOAD_TIMEOUT 覆盖）
+      - 每 256KB 发一块并打印进度，失败时能看到"传了多少、平均多快"
+    这样即便仍然失败，日志也能说明是慢还是彻底卡死。
+    """
+    u = urllib.parse.urlsplit(url)
+    if u.scheme == "http":
+        # 只为本地测试留的口子；线上签名地址是 https
+        conn = httpclient.HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    else:
+        conn = httpclient.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout)
+    path = u.path + (("?" + u.query) if u.query else "")
+    total = len(payload)
+    chunk = 256 * 1024
+    try:
+        conn.putrequest("PUT", path, skip_accept_encoding=True)
+        for k, v in headers.items():
+            conn.putheader(k, v)
+        if "Content-Length" not in headers:
+            conn.putheader("Content-Length", str(total))
+        conn.endheaders()
+
+        sent = 0
+        t0 = time.time()
+        last = 0.0
+        for i in range(0, total, chunk):
+            piece = payload[i:i + chunk]
+            conn.send(piece)
+            sent += len(piece)
+            now = time.time()
+            if now - last >= 5 or sent >= total:
+                last = now
+                mb = 1024.0 * 1024.0
+                print("    %5.1f%%  %.1f/%.1f MB  %.2f MB/s"
+                      % (sent * 100.0 / total, sent / mb, total / mb,
+                         sent / max(now - t0, 0.001) / mb))
+        resp = conn.getresponse()
+        return resp.status, resp.read()
+    finally:
+        conn.close()
+
+
 def upload_attachment(owner, repo, tag, fname, payload, attempts=3):
     """
     上传附件，失败自动重试。
@@ -358,6 +412,7 @@ def upload_attachment(owner, repo, tag, fname, payload, attempts=3):
 
     失败重试会【重新申请】上传地址：旧签名有效期很短。
     """
+    timeout = int(os.environ.get("GITCODE_UPLOAD_TIMEOUT", "1800"))
     last_err = None
     for i in range(1, attempts + 1):
         info = http("GET",
@@ -372,14 +427,22 @@ def upload_attachment(owner, repo, tag, fname, payload, attempts=3):
         if missing:
             die("上传地址返回的 headers 缺少 %s（服务端结构可能变了）" % missing)
         try:
-            http("PUT", info["url"], data=payload, headers=hdrs, raw=True,
-                 expect=(200, 201, 203, 204))
+            st, body = put_signed(info["url"], payload, hdrs, timeout)
+            if st not in (200, 201, 203, 204):
+                die("上传返回 HTTP %d：%s" % (st, body[:300]))
             return
         except SystemExit as e:
             last_err = e
             if i < attempts:
                 wait = 2 * i
                 print("  第 %d 次上传失败，%d 秒后重试（重新申请上传地址）..." % (i, wait))
+                time.sleep(wait)
+        except Exception as e:
+            last_err = e
+            if i < attempts:
+                wait = 2 * i
+                print("  第 %d 次上传失败：%s；%d 秒后重试（重新申请上传地址）..."
+                      % (i, e, wait))
                 time.sleep(wait)
     die("附件上传连续 %d 次失败：%s" % (attempts, last_err))
 
