@@ -86,8 +86,13 @@ def die(msg, code=1):
     sys.exit(code)
 
 
-def http(method, url, token=None, data=None, headers=None, raw=False, expect=(200, 201)):
-    """最小 HTTP 封装。token 走 private-token 头（与 GitCode 文档一致）。"""
+def http(method, url, token=None, data=None, headers=None, raw=False, expect=(200, 201),
+         tolerate=()):
+    """
+    最小 HTTP 封装。token 走 private-token 头（与 GitCode 文档一致）。
+
+    tolerate 里的状态码不当错误，直接返回 None（用于"先探是否存在"这类查询）。
+    """
     body = None
     hdrs = dict(headers or {})
     if data is not None:
@@ -108,10 +113,40 @@ def http(method, url, token=None, data=None, headers=None, raw=False, expect=(20
                 return payload
             return json.loads(payload.decode("utf-8")) if payload else None
     except urllib.error.HTTPError as e:
+        if e.code in tolerate:
+            return None
         detail = e.read().decode("utf-8", "replace")[:600]
         die("HTTP %d %s\n%s\n%s" % (e.code, e.reason, url, detail))
     except urllib.error.URLError as e:
         die("网络错误：%s（%s）" % (e.reason, url))
+
+
+def upsert_release(owner, repo, tag, body):
+    """
+    建 Release；已经存在就【更新】它的说明。
+
+    为什么必须能更新：此前用的是第三方上传 action，它只会"不存在时创建"，
+    从不更新正文（读过它的源码：只有 GET upload_url 与 POST 建 Release，
+    没有 PATCH）。于是重发同一个 tag 时，页面上永远挂着第一次写进去的旧说明，
+    怎么重跑都改不掉。
+
+    GitCode 支持 PATCH /releases/{tag}：实测参数不全时返回 PARAMETER_ERROR、
+    参数完整但缺鉴权时返回 "Invalid header parameter: private-token, required"，
+    说明路由存在且接受这套参数。
+    """
+    url = "%s/repos/%s/%s/releases/%s" % (
+        API, owner, repo, urllib.parse.quote(tag, safe=""))
+    exists = http("GET", url, token=TOKEN, tolerate=(404,)) is not None
+
+    payload = {"tag_name": tag, "name": tag, "body": body, "prerelease": False}
+    if exists:
+        rel = http("PATCH", url, token=TOKEN, data=payload)
+        print("  已更新既有 Release 的正文与名称")
+    else:
+        rel = http("POST", "%s/repos/%s/%s/releases" % (API, owner, repo),
+                   token=TOKEN, data=payload)
+        print("  已创建 Release")
+    return rel
 
 
 def version_code(version):
@@ -358,6 +393,8 @@ def main():
                     help="版本名，如 1.0.0（必填；CI 里由 tag 经 derive_version.sh 推导）")
     ap.add_argument("--apk", action="append",
                     help="要上传/校验的 APK 路径；可重复指定（默认包与 x86_64 包各一个）")
+    ap.add_argument("--asset", action="append",
+                    help="除 APK 之外要一起上传的产物（如 Windows zip）；只上传、不校验包内版本")
     ap.add_argument("--verify-only", action="store_true",
                     help="只校验包内版本号，不调用任何写接口、也不需要仓库坐标与 token\n"
                          "（CI 里构建完成后复核用）")
@@ -467,8 +504,8 @@ def main():
         print("  校验包内版本号：")
         for p in apks:
             verify_apk_version(p, version, code)
-    elif not args.dry_run:
-        print("提示：未指定 --apk，只创建 Release 不带附件")
+    elif not args.asset and not args.dry_run:
+        print("提示：未指定 --apk/--asset，只创建 Release 不带附件")
 
     if not TOKEN and not args.dry_run:
         die("缺少 GITCODE_TOKEN 环境变量（GitCode → 设置 → 访问令牌，需仓库写权限）")
@@ -478,24 +515,21 @@ def main():
         print("正式执行：GITCODE_TOKEN=xxx python tool/release_gitcode.py --apk <apk>")
         return
 
-    # 1) 创建 Release
+    # 1) 建 Release；已存在就更新正文（见 upsert_release 的说明）
     if not args.skip_create:
-        print("\n== 创建 Release ==")
-        try:
-            rel = http("POST", "%s/repos/%s/%s/releases" % (API, owner, repo), token=TOKEN,
-                       data={"tag_name": tag, "name": tag, "body": body, "prerelease": False})
-            print("  已创建：%s" % (rel.get("html_url") or rel.get("url") or tag))
-        except SystemExit:
-            # Release 已存在（例如补传附件时重跑）不该让整个流程失败，
-            # 但要提醒：正文里的 changelog 不会自动更新，需要显式重建 Release。
-            print("  警告：创建失败（多半是该 tag 的 Release 已存在）")
-            print("        继续尝试上传附件；如需更新说明，先删掉该 tag 再重发：")
-            print("        python tool/delete_gitcode_release.py %s" % tag)
+        print("\n== 建 / 更新 Release ==")
+        rel = upsert_release(owner, repo, tag, body)
+        print("  %s" % ((rel or {}).get("html_url") or (rel or {}).get("url") or tag))
     else:
-        print("\n== 跳过创建（--skip-create）==")
+        print("\n== 跳过建/更新（--skip-create），只上传附件 ==")
 
-    # 2) 上传附件
-    for p in apks:
+    # 2) 上传附件：APK 与其它产物（如 Windows zip）一起传
+    uploads = list(apks) + list(args.asset or [])
+    if not uploads:
+        print("\n（没有要上传的附件）")
+    for p in uploads:
+        if not os.path.exists(p):
+            die("产物不存在：%s" % p)
         fname = os.path.basename(p)
         # 附件名不能含 "+"：它在 URL 查询里代表空格，会让签名/路由对不上
         # （实测：名字带 + 的文件即使上传成功，匿名下载也是 404）。

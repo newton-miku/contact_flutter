@@ -447,29 +447,6 @@ jobs:
           GITHUB_REF_NAME="$TAG" bash tool/gen_release_notes.sh > /tmp/auto_notes.md || true
           head -10 /tmp/auto_notes.md || true
 
-      # 由脚本产出 Release 正文（含 Version/Version-Code 头两行，App 据此核对版本号），
-      # 并顺带复核两个 APK 的包内版本号；此步不调用任何写接口。
-      - name: 生成 Release 正文
-        run: |
-          set -euo pipefail
-          python3 tool/release_gitcode.py \
-            --version "$APP_VER" \
-            --apk "dist/contact_flutter_${TAG}.apk" \
-            --apk "dist/contact_flutter_${TAG}_x86_64.apk" \
-            --notes-file /tmp/auto_notes.md \
-            --emit-body /tmp/release_body.md
-
-      # 建 Release 与上传附件交给现成的 action：它自己会 URL 编码文件名并重试。
-      # body 是字符串参数，所以先把正文文件读进环境变量（支持多行）。
-      - name: 读取 Release 正文
-        run: |
-          set -euo pipefail
-          {
-            echo 'RELEASE_BODY<<__NOTES_EOF__'
-            cat /tmp/release_body.md
-            echo '__NOTES_EOF__'
-          } >> "$GITHUB_ENV"
-
       # 公开仓只放版本历史与 Release 附件，【源码一律不传】。
       #
       # ⚠️ `git push <tag>` 会把该提交可达的【全部对象】传过去，等于把整个源码
@@ -499,20 +476,25 @@ jobs:
           git push gitcode "${SHA}:refs/tags/${TAG}"
           git ls-remote --tags gitcode "refs/tags/${TAG}"
 
-      - name: 发布到 GitCode（建 Release + 上传 APK 与 Windows 包）
-        uses: Zxilly/upload-gitcode-release@v1.0.0
-        with:
-          gitcode-token: ${{ secrets.GITCODE_TOKEN }}
-          target-repo: ${{ env.GITCODE_OWNER }}/${{ env.GITCODE_REPO }}
-          tag: ${{ env.TAG }}
-          name: ${{ env.TAG }}
-          body: ${{ env.RELEASE_BODY }}
-          target-commitish: main
-          files: |
-            dist/contact_flutter_${{ env.TAG }}.apk
-            dist/contact_flutter_${{ env.TAG }}_x86_64.apk
-            dist/contact_flutter_windows_x64_${{ env.TAG }}.zip
-          fail-if-no-files: 'true'
+      # 建/更新 Release、上传附件、同步公开仓 README —— 全部交给自己的脚本。
+      #
+      # 为什么不用第三方 action：读过它的源码，它只有
+      #     GET  /releases/{tag}/upload_url   （取签名地址）
+      #     POST /releases                    （不存在时创建）
+      # 没有 PATCH，也就是【从不更新已有 Release 的正文】。于是重发同一个 tag 时，
+      # 页面上永远挂着第一次写进去的旧说明，怎么重跑都改不掉。
+      # 我们的脚本能 create-or-update，还有重试、会校验 x-obs-* 头、报错也更明确。
+      #
+      # 顺序不能反：Release 必须挂在已存在的 tag 上，所以放在建空 tag 之后。
+      - name: 发布到 GitCode（建/更新 Release + 上传 APK 与 Windows 包）
+        run: |
+          set -euo pipefail
+          python3 tool/release_gitcode.py \
+            --version "$APP_VER" \
+            --apk "dist/contact_flutter_${TAG}.apk" \
+            --apk "dist/contact_flutter_${TAG}_x86_64.apk" \
+            --asset "dist/contact_flutter_windows_x64_${TAG}.zip" \
+            --notes-file /tmp/auto_notes.md
 
       - name: 复核匿名可读且可下载（App 走的就是这条路径）
         run: python3 tool/verify_gitcode_release.py
