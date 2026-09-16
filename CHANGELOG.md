@@ -34,7 +34,7 @@
 - 失败按阶段区分：下载/解压失败才回退浏览器；已下好但安装没起来只提示重试，不重复下载
 
 ### 多平台分发
-- 发布产物与 GitHub Release 命名完全一致：
+- 发布产物命名固定，App 端按这套约定挑包：
   `contact_flutter_vX.Y.Z.apk`（arm + arm64）、`contact_flutter_vX.Y.Z_x86_64.apk`（模拟器）、
   `contact_flutter_windows_x64_vX.Y.Z.zip`
 - Android 按设备 ABI 挑包：x86 模拟器优先 x86_64 包，真机只用默认包

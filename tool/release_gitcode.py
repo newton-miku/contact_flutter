@@ -361,7 +361,9 @@ def main():
     ap.add_argument("--verify-only", action="store_true",
                     help="只校验包内版本号，不调用任何写接口、也不需要仓库坐标与 token\n"
                          "（CI 里构建完成后复核用）")
-    ap.add_argument("--notes-file", help="更新说明文件（CI 里用自动生成的中文说明）")
+    ap.add_argument("--notes-file",
+                    help="更新说明的【兜底】文件：CHANGELOG.md 里没有对应 [版本] 块时才用它\n"
+                         "（CI 里放按提交记录自动生成的说明）")
     ap.add_argument("--dry-run", action="store_true", help="只校验，不调用写接口")
     ap.add_argument("--skip-create", action="store_true", help="Release 已存在，只上传附件")
     ap.add_argument("--check-token", action="store_true", help="只验证 token 是否有效")
@@ -414,18 +416,21 @@ def main():
     print("  tag    : %s" % tag)
     print("  versionCode : %d（由版本名换算）" % code)
 
-    # 说明来源：--notes-file（CI 用自动生成的中文说明）> CHANGELOG 对应块
-    notes = None
-    if args.notes_file:
+    # 说明来源：**CHANGELOG 优先**，没有对应段落才回退到 --notes-file。
+    #
+    # 顺序不能反：CHANGELOG 是人手写、可以反复打磨的正式说明，
+    # 而 --notes-file（CI 按提交记录自动生成）只是"没写也能发版"的兜底。
+    # 之前写反了，结果手写的 CHANGELOG 段落永远被自动生成的顶掉。
+    notes = extract_version_block(version)
+    if notes:
+        print("== 更新说明：来自 CHANGELOG.md 的 [%s] 块（%d 字）==" % (version, len(notes)))
+    if not notes and args.notes_file:
         if not os.path.exists(args.notes_file):
             die("说明文件不存在：%s" % args.notes_file)
         notes = open(args.notes_file, encoding="utf-8").read().strip() or None
         if notes:
-            print("== 更新说明：来自 %s（%d 字）==" % (args.notes_file, len(notes)))
-    if not notes:
-        notes = extract_version_block(version)
-        if notes:
-            print("== 更新说明：来自 CHANGELOG.md 的 [%s] 块（%d 字）==" % (version, len(notes)))
+            print("== 更新说明：CHANGELOG 里没有 [%s] 块，改用 %s（%d 字）=="
+                  % (version, args.notes_file, len(notes)))
     if not notes:
         notes = "本次发布未单独撰写更新说明。"
         print("== 更新说明：CHANGELOG.md 里没有 [%s] 块，使用占位说明 ==" % version)

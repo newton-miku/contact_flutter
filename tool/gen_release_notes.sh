@@ -74,7 +74,9 @@ fi
   fi
   echo
   echo "$BODY"
-  if [[ -n "$PREV" ]]; then
-    echo "**完整变更列表**：${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
-  fi
 }
+# 这里刻意【不】输出 "完整变更列表：<GitHub 对比链接>"。
+# 说明会被发布到 GitCode 公开仓，而那个链接指向私有仓：
+#   1) 对外是 404，点了没用
+#   2) 等于把私有仓的 owner/repo 公开出去，正是"公私两仓"要避免的
+# 所以任何情况下都不要往这些说明里拼仓库地址。
