@@ -586,8 +586,20 @@ def main():
     else:
         print("\n== 跳过建/更新（--skip-create），只上传附件 ==")
 
-    # 2) 上传附件：APK 与其它产物（如 Windows zip）一起传
+    # 2) 同步公开仓 README（版本历史）。
+    #
+    # 刻意放在上传附件【之前】：上传是整条链路里最脆弱的一步（跨境、几十 MB），
+    # 它一旦失败就 die，版本历史便再也没机会更新——这一版之前就是这么卡住的。
+    # README 只是一个小请求，先把它落定。
+    print("\n== 同步公开仓 README（版本历史）==")
+    sync_public_readme(owner, repo, version, TOKEN)
+
+    # 3) 上传附件：APK 与其它产物（如 Windows zip）一起传。
+    #
+    # 三个都试一遍再报错：第一个失败就整体退出的话，后面两个连试都没试过，
+    # 日志里看不出它们是不是也有问题。
     uploads = list(apks) + list(args.asset or [])
+    failed = []
     if not uploads:
         print("\n（没有要上传的附件）")
     for p in uploads:
@@ -603,12 +615,12 @@ def main():
         with open(p, "rb") as f:
             payload = f.read()
         print("  上传中（%.1f MB）..." % (len(payload) / 1024.0 / 1024.0))
-        upload_attachment(owner, repo, tag, fname, payload)
-        print("  上传完成")
-
-    # 3) 同步公开仓 README（版本历史）
-    print("\n== 同步公开仓 README（版本历史）==")
-    sync_public_readme(owner, repo, version, TOKEN)
+        try:
+            upload_attachment(owner, repo, tag, fname, payload)
+            print("  上传完成")
+        except SystemExit as e:
+            failed.append(fname)
+            print("  上传失败：%s（继续处理下一个）" % e)
 
     # 4) 复核：列出 release，确认可读
     print("\n== 复核（免鉴权接口，App 就用这个）==")
@@ -620,6 +632,11 @@ def main():
               % (r.get("tag_name"), assets or "无", "有" if has_code else "缺"))
     print("\n完成。App 端查询地址：%s/repos/%s/%s/releases" % (API, owner, repo))
     print("公开仓页面：https://gitcode.com/%s/%s" % (owner, repo))
+
+    if failed:
+        print("\n有 %d 个附件上传失败：%s" % (len(failed), "、".join(failed)), file=sys.stderr)
+        print("（Release 正文与公开仓 README 已更新，只需补传附件）", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
