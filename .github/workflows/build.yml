@@ -456,11 +456,19 @@ jobs:
       #
       #    作者与时间都写死，使同一个 tag 每次算出同一个 SHA：重跑是
       #    "Everything up-to-date"，而不是每次都造一个新提交去强推。
-      - name: 在公开仓建一个空 tag（只作 Release 锚点，不含任何源码）
+      #
+      # 重新发布同一个 tag 时先删掉旧 tag：GitCode 的 Release 是挂在 tag 上的，
+      # 而 Release 自身不支持 DELETE（实测返回 405），所以"删 tag"就是清掉旧
+      # Release 的唯一办法。清掉再建，Release 的说明与附件才不会残留上一次的。
+      - name: 清理公开仓旧 tag 并重建空 tag（只作 Release 锚点，不含任何源码）
         run: |
           set -euo pipefail
           git remote add gitcode \
             "https://oauth2:${GITCODE_TOKEN}@gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git"
+          if git ls-remote --tags gitcode "refs/tags/${TAG}" | grep -q .; then
+            echo "公开仓已有 ${TAG}：先删掉（连同它的旧 Release）"
+            git push gitcode ":refs/tags/${TAG}"
+          fi
           EMPTY_TREE="$(git hash-object -w -t tree /dev/null)"
           SHA="$(GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' \
                  GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
