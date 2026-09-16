@@ -1,6 +1,12 @@
 # 客户端自动构建：push 到 main 或手动触发时，
 # 并行编译 Android APK 与 Windows x64，并上传为 Action 产物。
 #
+# 打 tag（如 v1.0.0）时在同一次运行里继续做两件发布：
+#   1) release         → GitHub Release（私有仓，仅自己可见）
+#   2) publish-gitcode → GitCode 公开仓（App 的检查更新与下载走这里）
+# 两个发布用的是【同一批编好的产物】：GitCode 那边直接从 GitHub Release 取，
+# 不再重新编译一遍，省掉一份完全重复的 Android/Windows 构建开销。
+#
 # ⚠️ 不在仓库里写死的两项，都通过 Actions Secret 注入
 #    （Settings → Secrets and variables → Actions → Secrets → New repository secret）：
 #      API_BASE_URL          后端地址，如 https://你的服务器（Android 与 Windows 都要）
@@ -22,7 +28,7 @@
 # 打 tag（如 v1.0.0）并 push 时，会额外创建 GitHub Release：
 #   - contact_flutter_v1.0.0.apk / contact_flutter_v1.0.0_x86_64.apk（下载即装，零解压）
 #   - contact_flutter_windows_x64_v1.0.0.zip（单层 zip，解压即用）
-name: 客户端构建 (Android + Windows)
+name: 客户端构建与发布 (Android + Windows)
 
 on:
   push:
@@ -115,7 +121,7 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
       - run: flutter pub get
-      # 版本号只在打 tag 时注入（与 release-gitcode.yml 共用同一个换算脚本）。
+      # 版本号只在打 tag 时注入（换算由 tool/derive_version.sh 统一完成）。
       # 不注入就回退 pubspec 的占位值——那样的包虽然能装，但"检查更新"会一直误判。
       - name: 由 tag 推导版本号
         if: startsWith(github.ref, 'refs/tags/v')
@@ -337,3 +343,193 @@ jobs:
             dist/contact_flutter_${{ github.ref_name }}.apk
             dist/contact_flutter_${{ github.ref_name }}_x86_64.apk
             dist/contact_flutter_windows_x64_${{ github.ref_name }}.zip
+
+  # ---------- 发布到 GitCode 公开仓 ----------
+  # 编译只做一次：这里直接取上面 release 作业已经挂到 GitHub Release 上的三个产物，
+  # 不再重新编译一遍（私有仓的 Actions 分钟数按倍数扣，Windows 还 ×2；
+  # 而且两边用同一份字节，不会出现"GitHub 上是一个包、GitCode 上是另一个包"）。
+  #
+  # 为什么并进本工作流而不是单独一个：tag 推送会同时触发两个工作流，
+  # 各自编译一遍就是双份开销，所以合成一次运行。
+  publish-gitcode:
+    name: 发布到 GitCode
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # 读 GitHub Release 的产物
+    environment: ${{ github.ref_type == 'tag' && github.event.repository.default_branch || github.ref_name }}
+    env:
+      GITCODE_ENV_NAME: ${{ github.ref_type == 'tag' && github.event.repository.default_branch || github.ref_name }}
+      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      # owner/repo 不是敏感信息，Variables 与 Secrets 两个位置都认
+      # （放错页很容易犯，而 GitHub 只给空值、报错指不到真正原因）。
+      # token 刻意【不】从 Variables 读：变量不脱敏，会泄漏进日志。
+      GITCODE_OWNER: ${{ vars.GITCODE_OWNER || secrets.GITCODE_OWNER }}
+      GITCODE_REPO: ${{ vars.GITCODE_REPO || secrets.GITCODE_REPO }}
+    steps:
+      # 完整历史：gen_release_notes.sh 要找上一个 tag 并跨 tag 比对提交
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 校验配置（变量与密钥）
+        run: |
+          set -euo pipefail
+          # 把"取了哪些、是空还是不空"写进摘要：GitHub 对 vars/secrets 的解析是
+          # 「Environment 优先，回退 Repository」，取不到时只给空值、不说它去哪找过，
+          # 于是同一种症状可能是好几种完全不同的原因。
+          mark() { [ -n "${1:-}" ] && echo "已取到" || echo "**空**"; }
+          {
+            echo "### 配置解析情况"
+            echo ""
+            echo "本次生效的 Environment：\`${GITCODE_ENV_NAME}\`"
+            echo ""
+            echo "| 名称 | 期望位置 | 结果 |"
+            echo "| --- | --- | --- |"
+            echo "| GITCODE_OWNER | Variables 或 Secrets | $(mark "${GITCODE_OWNER:-}") |"
+            echo "| GITCODE_REPO | Variables 或 Secrets | $(mark "${GITCODE_REPO:-}") |"
+            echo "| GITCODE_TOKEN | 仅 Secrets | $(mark "${GITCODE_TOKEN:-}") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          missing=""
+          # 注意用 $'\n' 拼接换行（普通字符串里的 \n 只会输出字面量）
+          [ -n "${GITCODE_OWNER:-}" ] || missing="${missing}"$'\n'"  - GITCODE_OWNER（公开仓所属用户名/组织）"
+          [ -n "${GITCODE_REPO:-}" ]  || missing="${missing}"$'\n'"  - GITCODE_REPO（公开仓仓库名）"
+          [ -n "${GITCODE_TOKEN:-}" ] || missing="${missing}"$'\n'"  - GITCODE_TOKEN（GitCode 访问令牌，需仓库读写权限）"
+          if [ -n "${missing}" ]; then
+            echo "::error::缺少以下配置：${missing}"
+            cat <<'CONFIG_HELP'
+          GitHub 的取值顺序是【Environment 作用域优先，找不到再回退 Repository 作用域】。
+          本次作业声明的 Environment 就是上面摘要里那个名字，请依次确认：
+
+            1) 这个 Environment 在本仓库（GitHub 上的私有仓）里确实存在。
+               不存在时 Actions 会自动建一个【空的】，于是什么都取不到。
+            2) 变量放 Variables 页、密钥放 Secrets 页，名字大小写要完全一致。
+               token 只能放 Secrets：Variables 不脱敏，会把它写进 CI 日志。
+            3) 就在【本仓库】里 —— 不要加到 GitCode 那个公开仓，那是另一个仓库。
+            4) 不建 Environment 也行：三项都放 Repository 作用域，同样是支持的。
+          CONFIG_HELP
+            exit 1
+          fi
+          echo "配置检查通过：仓库 ${GITCODE_OWNER}/${GITCODE_REPO}"
+
+      - name: 由 tag 推导版本号
+        run: bash tool/derive_version.sh "$GITHUB_REF_NAME" --github-env >> "$GITHUB_ENV"
+
+      # 编译产物直接复用，不再重跑 Android / Windows 构建
+      - name: 从 GitHub Release 取现成产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$GITHUB_REF_NAME" --dir dist --clobber
+          for f in \
+            "contact_flutter_${TAG}.apk" \
+            "contact_flutter_${TAG}_x86_64.apk" \
+            "contact_flutter_windows_x64_${TAG}.zip"
+          do
+            [ -s "dist/$f" ] || { echo "::error::GitHub Release 里缺少 $f"; exit 1; }
+          done
+          # 附件名含 '+' 会让匿名下载 404
+          if ls dist/ | grep -q '+'; then
+            echo "::error::产物名含 '+'，会导致下载 404"
+            ls dist/
+            exit 1
+          fi
+          ls -lh dist/
+
+      - name: 生成更新说明（CHANGELOG 没有对应段落时使用）
+        run: |
+          set -euo pipefail
+          GITHUB_REF_NAME="$TAG" bash tool/gen_release_notes.sh > /tmp/auto_notes.md || true
+          head -10 /tmp/auto_notes.md || true
+
+      # 由脚本产出 Release 正文（含 Version/Version-Code 头两行，App 据此核对版本号），
+      # 并顺带复核两个 APK 的包内版本号；此步不调用任何写接口。
+      - name: 生成 Release 正文
+        run: |
+          set -euo pipefail
+          python3 tool/release_gitcode.py \
+            --version "$APP_VER" \
+            --apk "dist/contact_flutter_${TAG}.apk" \
+            --apk "dist/contact_flutter_${TAG}_x86_64.apk" \
+            --notes-file /tmp/auto_notes.md \
+            --emit-body /tmp/release_body.md
+
+      # 建 Release 与上传附件交给现成的 action：它自己会 URL 编码文件名并重试。
+      # body 是字符串参数，所以先把正文文件读进环境变量（支持多行）。
+      - name: 读取 Release 正文
+        run: |
+          set -euo pipefail
+          {
+            echo 'RELEASE_BODY<<__NOTES_EOF__'
+            cat /tmp/release_body.md
+            echo '__NOTES_EOF__'
+          } >> "$GITHUB_ENV"
+
+      # 公开仓只放版本历史与 Release 附件，【源码一律不传】。
+      #
+      # ⚠️ `git push <tag>` 会把该提交可达的【全部对象】传过去，等于把整个源码
+      #    与提交历史公开。所以这里不推我们的提交，而是造一个【空树、无父提交】
+      #    的孤立提交，只把它当 tag 推过去——tag 只是 Release 的锚点，
+      #    App 端只读 tag 名与附件，不关心它指向什么内容。
+      #
+      #    作者与时间都写死，使同一个 tag 每次算出同一个 SHA：重跑是
+      #    "Everything up-to-date"，而不是每次都造一个新提交去强推。
+      - name: 在公开仓建一个空 tag（只作 Release 锚点，不含任何源码）
+        run: |
+          set -euo pipefail
+          git remote add gitcode \
+            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git"
+          EMPTY_TREE="$(git hash-object -w -t tree /dev/null)"
+          SHA="$(GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' \
+                 GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
+                 git -c user.name='release' -c user.email='release@local' \
+                 commit-tree "$EMPTY_TREE" -m "release ${TAG}")"
+          echo "空提交 $SHA（树 $EMPTY_TREE）"
+          # 推之前先自证是空树：万一哪天改错了，这一步会拦住源码外泄
+          if [ -n "$(git ls-tree "$SHA")" ]; then
+            echo "::error::待推送的提交不是空树，存在源码外泄风险，已中止"
+            git ls-tree "$SHA"
+            exit 1
+          fi
+          git push gitcode "${SHA}:refs/tags/${TAG}"
+          git ls-remote --tags gitcode "refs/tags/${TAG}"
+
+      - name: 发布到 GitCode（建 Release + 上传 APK 与 Windows 包）
+        uses: Zxilly/upload-gitcode-release@v1.0.0
+        with:
+          gitcode-token: ${{ secrets.GITCODE_TOKEN }}
+          target-repo: ${{ env.GITCODE_OWNER }}/${{ env.GITCODE_REPO }}
+          tag: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          body: ${{ env.RELEASE_BODY }}
+          target-commitish: main
+          files: |
+            dist/contact_flutter_${{ env.TAG }}.apk
+            dist/contact_flutter_${{ env.TAG }}_x86_64.apk
+            dist/contact_flutter_windows_x64_${{ env.TAG }}.zip
+          fail-if-no-files: 'true'
+
+      - name: 复核匿名可读且可下载（App 走的就是这条路径）
+        run: python3 tool/verify_gitcode_release.py
+
+      - name: 汇总
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### GitCode 发布结果"
+            echo ""
+            echo "- tag：${TAG:-（未推导）}"
+            echo "- versionName：${APP_VER:-}"
+            echo "- versionCode：${APP_CODE:-}"
+            echo "- 产物（直接复用 GitHub Release 的同一份字节）："
+            echo "  - contact_flutter_${TAG}.apk（arm + arm64）"
+            echo "  - contact_flutter_${TAG}_x86_64.apk（模拟器）"
+            echo "  - contact_flutter_windows_x64_${TAG}.zip（Windows 免安装包）"
+            echo "- 公开仓：https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}/releases"
+          } >> "$GITHUB_STEP_SUMMARY"

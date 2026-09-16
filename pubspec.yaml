@@ -7,7 +7,7 @@ publish_to: 'none'
 #   - 从 tag 取版本名
 #   - 用 MAJOR×10000 + MINOR×100 + PATCH 换算出 versionCode
 #   - 通过 --build-name / --build-number 覆盖本次构建
-#     （Android / Windows / Linux 三个平台都注入，见 release-gitcode.yml；
+#     （Android / Windows / Linux 三个平台都注入，见 .github/workflows/build.yml；
 #      桌面端的版本号分别来自 exe 的 VERSIONINFO 与 flutter_assets/version.json，
 #      不注入就会固定成这里的值，用户装了新版仍被提示"发现新版本"）
 #
