@@ -13,6 +13,9 @@
 #   API_BASE_URL=https://你的服务器 bash tool/build_deb.sh
 #   API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch arm64
 #   bash tool/build_deb.sh --arch arm64 --skip-build    # 复用已有 build/linux 产物，只重新打包
+#   TAG=v1.0.1 API_BASE_URL=https://... bash tool/build_deb.sh
+#       指定 tag 时版本号由它推导（与 CI 用同一个换算脚本），
+#       不指定则回退 pubspec.yaml 里的 version（开发期占位值）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # 仓库根目录（contact_flutter/）
@@ -89,24 +92,39 @@ if [[ -z "$API_BASE_URL" && "$SKIP_BUILD" == "0" ]]; then
   exit 1
 fi
 
-# pubspec 里是 1.0.0+10000 → deb 版本用 1.0.0+10000（Debian 合法）
-FULL_VERSION="$(awk -F': *' '/^version:/{print $2; exit}' pubspec.yaml | tr -d '[:space:]')"
-if [[ -z "$FULL_VERSION" ]]; then
-  echo "错误：无法从 pubspec.yaml 读取 version。" >&2
+# 版本号必须来自 tag，且与 Android / Windows 同源。
+#
+# 绝不回退到 pubspec 里的开发期占位值（那是 0.0.0）：
+# 桌面端的 PackageInfo 读的是 bundle 里 flutter_assets/version.json，
+# 由构建时的 --build-name/--build-number 决定；不注入就会固定成占位值，
+# 用户装了新版仍被提示"发现新版本"，而且同一个版本在不同平台会对不上。
+if [[ -z "${TAG:-}" ]]; then
+  echo "错误：必须指定 TAG，例如" >&2
+  echo "  TAG=v1.0.1 API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch arm64" >&2
+  echo "（版本换算由 tool/derive_version.sh 统一完成，与 CI 完全一致）" >&2
   exit 1
 fi
-APP_VERSION="${FULL_VERSION%%+*}"
+while IFS='=' read -r _k _v; do
+  case "$_k" in
+    TAG) TAG="$_v" ;;
+    APP_VER) APP_VER="$_v" ;;
+    APP_CODE) APP_CODE="$_v" ;;
+  esac
+done < <(bash tool/derive_version.sh "$TAG" --github-env)
+APP_VERSION="$APP_VER"
+VERSION_ARGS=(--build-name="$APP_VER" --build-number="$APP_CODE")
 BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 SHA_SHORT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 
 BUNDLE_DIR="build/linux/$HOST_ARCH/release/bundle"
 OUT_DIR="../_release"
 PKG_NAME="contact_flutter"
-DEB_NAME="${PKG_NAME}_${FULL_VERSION}_${ARCH}.deb"
+# deb 版本用版本名即可（Debian 的版本比较能正确处理 1.0.1 < 1.0.2）
+DEB_NAME="${PKG_NAME}_${APP_VERSION}_${ARCH}.deb"
 STAGE="build/deb-stage"
 
 echo "==> 目标架构：$ARCH（宿主 $HOST_ARCH）"
-echo "==> 版本：$FULL_VERSION   提交：$SHA_SHORT"
+echo "==> 版本：$APP_VERSION（versionCode $APP_CODE）   提交：$SHA_SHORT"
 
 # ---------------- 1. 构建 ----------------
 if [[ "$SKIP_BUILD" == "1" ]]; then
@@ -115,6 +133,7 @@ if [[ "$SKIP_BUILD" == "1" ]]; then
 else
   echo "==> flutter build linux --release"
   flutter build linux --release \
+    "${VERSION_ARGS[@]}" \
     --dart-define=API_BASE_URL="$API_BASE_URL" \
     --dart-define=APP_VERSION="$SHA_SHORT" \
     --dart-define=BUILD_TIME="$BUILD_TIME"
@@ -157,7 +176,7 @@ fi
 
 # 2.5 DEBIAN 元数据
 SIZE_KB="$(du -sk "$STAGE" | cut -f1)"
-sed -e "s/@VERSION@/$FULL_VERSION/g" \
+sed -e "s/@VERSION@/$APP_VERSION/g" \
     -e "s/@ARCH@/$ARCH/g" \
     -e "s/@SIZE@/$SIZE_KB/g" \
     "packaging/linux/control.in" > "$STAGE/DEBIAN/control"

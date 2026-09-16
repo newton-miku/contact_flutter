@@ -26,6 +26,10 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- 应用内更新：下载新版 APK 后拉起系统安装器。
+         Android 8+ 需显式声明该权限，否则安装意图会被系统直接拒绝。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- 前台服务保活：让进程在用户划掉后台后仍尽量存活，保证来电广播及时送达 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -112,5 +116,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- 应用内更新：把下载好的 APK 以 content:// 交给系统安装器。
+             直接传 file:// 在 Android 7+ 会抛 FileUriExposedException。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

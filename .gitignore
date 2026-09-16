@@ -49,3 +49,11 @@ app.*.map.json
 /android/key.properties
 *.jks
 *.keystore
+
+# 本地专属的运维脚本：CI 不依赖，也不属于 App 本体，故不入库
+# （release_gitcode.py 与 verify_gitcode_release.py 会被 CI 调用，需要入库）
+/tool/delete_gitcode_release.py
+
+# 图标生成物：tool/make_logo.py 产出，可随时重新生成；
+# 真正被构建读取的图标在 android/ios/macos/windows/web 各自的资源目录里
+/logo/

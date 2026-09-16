@@ -65,6 +65,14 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
+        // 应用内更新：下载目录 + 拉起系统安装器
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ApkInstaller.CHANNEL
+        ).setMethodCallHandler { call, result ->
+            ApkInstaller.handle(this, call, result)
+        }
+
         // 来电显示：Flutter 推联系人快照；原生在响铃时直读文件匹配。
         val callerId = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

@@ -29,7 +29,8 @@ class _AboutScreenState extends ConsumerState<AboutScreen> {
   ServerVersion? _server;
   String? _error;
 
-  // 真实安装版本（versionName / versionCode，来自 pubspec 的 version 字段）。
+  // 真实安装版本（versionName / versionCode）。
+  // 两者都由发布 tag 在构建时注入，pubspec 里只有开发期占位值 0.0.0。
   String _pkgVersion = '—';
   String _pkgBuild = '';
 

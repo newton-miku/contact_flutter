@@ -1,16 +1,24 @@
+import 'dart:async';
+import 'dart:io' show Directory, File, exit;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/contact.dart';
 import '../../data/providers/contacts_provider.dart';
+import '../../services/apk_installer.dart';
+import '../../services/app_update.dart';
 import '../../services/biometric_auth.dart';
 import '../../services/contacts_exporter.dart';
 import '../../services/caller_id_sync.dart';
 import '../../services/device_auth.dart';
 import '../../services/pinyin_search.dart';
+import '../../services/update_download.dart';
+import '../../services/windows_installer.dart';
 import '../widgets/avatar.dart';
 import '../widgets/contact_detail_sheet.dart';
 import '../widgets/group_header.dart';
@@ -32,6 +40,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // 导出模式：仅在此模式下才可勾选联系人并导出。默认浏览态 = 点击查看详情/复制/拨打。
   bool _exportMode = false;
 
+  // 启动后的自动更新检查定时器（dispose 时必须取消）
+  Timer? _updateTimer;
+
   /// 手机端（Android/iOS）：来电名片、应用锁、生物认证这些都依赖手机能力。
   /// 桌面端（Linux/Windows）没有这些能力，对应入口一律不展示。
   static bool get _mobile =>
@@ -44,6 +55,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Future.microtask(() => ref.read(contactsProvider.notifier).load());
     _openPendingRoute();
     CallerIdSync.setRouteHandler(_gotoRoute);
+    _scheduleAutoUpdateCheck();
+  }
+
+  /// 启动后延迟自动检查应用更新。
+  ///
+  /// 特意延迟 3 秒且不阻塞首帧：更新提示是"顺带的服务"，不该影响启动体验。
+  /// 检查失败、超时、或用户已跳过该版本时静默（见 autoCheckAppUpdate）。
+  void _scheduleAutoUpdateCheck() {
+    _updateTimer?.cancel();
+    _updateTimer = Timer(const Duration(seconds: 3), () async {
+      if (!mounted) return;
+      final up = await autoCheckAppUpdate();
+      if (!mounted || up == null) return;
+      await _showAppUpdateDialog(up, auto: true);
+    });
   }
 
   /// 常驻通知被点击时会带路由过来（caller_id_settings）：
@@ -63,6 +89,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
     CallerIdSync.setRouteHandler(null);
     _searchController.dispose();
     super.dispose();
@@ -153,6 +180,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Navigator.of(context).push(
                           MaterialPageRoute(builder: (_) => const AboutScreen()),
                         );
+                      case _MenuAction.checkAppUpdate:
+                        _checkAppUpdate(context);
                       case _MenuAction.checkUpdate:
                         _checkUpdate(context);
                       case _MenuAction.changePassword:
@@ -216,14 +245,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       const PopupMenuDivider(),
                     ],
-                    // 检查更新
+                    // 检查应用更新（安装包版本，走公共更新源）
                     const PopupMenuItem(
-                      value: _MenuAction.checkUpdate,
+                      value: _MenuAction.checkAppUpdate,
                       child: Row(
                         children: [
                           Icon(Icons.system_update_outlined, size: 20),
                           SizedBox(width: 12),
-                          Text('检查更新'),
+                          Text('检查应用更新'),
+                        ],
+                      ),
+                    ),
+                    // 检查通讯录更新（服务端号码库版本，与上面是两件事）
+                    const PopupMenuItem(
+                      value: _MenuAction.checkUpdate,
+                      child: Row(
+                        children: [
+                          Icon(Icons.sync, size: 20),
+                          SizedBox(width: 12),
+                          Text('同步通讯录'),
                         ],
                       ),
                     ),
@@ -561,6 +601,346 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ..showSnackBar(SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
   }
 
+  /// 手动检查应用更新（安装包版本）。
+  /// 与 [_checkUpdate] 是两件事：那个查服务端通讯录数据版本，这个查安装包。
+  Future<void> _checkAppUpdate(BuildContext context) async {
+    final res = await checkAppUpdate();
+    if (!context.mounted) return;
+    if (res.update != null) {
+      await _showAppUpdateDialog(res.update!, auto: false);
+      return;
+    }
+    // 已最新，或检查失败：给出明确文案而不是静默
+    final msg = res.error == null ? '已是最新版本' : '检查失败：${res.error}';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.system_update_alt, color: Colors.green, size: 24),
+            SizedBox(width: 8),
+            Text('检查应用更新'),
+          ],
+        ),
+        content: Text(msg),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 更新提示弹窗：显示新版本号、更新说明，并可一键下载/跳转。
+  ///
+  /// [auto] 为 true 表示启动时自动弹出，此时"稍后"会记住该版本不再提示；
+  /// 手动检查时不记录，避免用户主动查看却把版本"跳过"了。
+  Future<void> _showAppUpdateDialog(AppUpdate up, {required bool auto}) async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.new_releases_outlined, color: Colors.green, size: 24),
+            const SizedBox(width: 8),
+            Expanded(child: Text('发现新版本 ${up.versionName}')),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (up.notes.isNotEmpty)
+                  Text(up.notes, style: const TextStyle(height: 1.5))
+                else
+                  const Text('（该版本未附更新说明）'),
+                if (!up.hasDownload) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _canInstallInApp
+                        ? '该版本暂未附带安装包，可到发布页面下载。'
+                        : '本系统暂不支持应用内更新，可到发布页面查看。',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'later'),
+            child: Text(auto ? '稍后' : '关闭'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'download'),
+            child: Text(up.hasDownload ? '去下载' : '打开发布页'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    if (action == 'later') {
+      // 仅自动提示时记住"跳过这一版"，避免每次启动都弹
+      if (auto) await skipVersion(up.versionName);
+      return;
+    }
+    // 优先应用内下载并安装；任何环节失败才回退到浏览器。
+    if (up.hasDownload && _canInstallInApp) {
+      final ok = await _installInApp(up);
+      if (ok) return;
+    }
+    await _openInBrowser(up.hasDownload ? up.downloadUrl! : up.pageUrl);
+  }
+
+  /// 本机是否能应用内更新：Android 装 APK，Windows 自替换 zip。
+  /// Linux/macOS 只能引导到发布页——发布链路目前不产出这两个平台的包。
+  static bool get _canInstallInApp =>
+      ApkInstaller.isSupported || WindowsInstaller.isSupported;
+
+  /// 应用内下载 + 安装，带进度弹窗。返回 true 表示不必再跳浏览器。
+  ///
+  /// 之所以所有异常都吞掉并返回 false：更新是辅助功能，
+  /// 失败应该安静地退到浏览器下载，而不是把用户卡在错误弹窗上。
+  Future<bool> _installInApp(AppUpdate up) async {
+    if (ApkInstaller.isSupported) return _installApk(up);
+    if (WindowsInstaller.isSupported) return _installWindows(up);
+    return false;
+  }
+
+  /// Android：下载 APK 并交给系统安装器。
+  Future<bool> _installApk(AppUpdate up) async {
+    final progress = ValueNotifier<double?>(0);
+    var dialogOpen = true;
+    // 进度弹窗不可点掉：下载中途误触关闭会留下半截文件，反而更难排查
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('正在下载更新'),
+        content: ValueListenableBuilder<double?>(
+          valueListenable: progress,
+          builder: (_, value, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LinearProgressIndicator(value: value),
+              const SizedBox(height: 12),
+              Text(value == null
+                  ? '已开始下载…'
+                  : '${(value * 100).clamp(0, 100).toStringAsFixed(0)}%'),
+            ],
+          ),
+        ),
+      ),
+    ).then((_) => dialogOpen = false);
+
+    try {
+      final fileName = up.assetName ?? 'contact_flutter_${up.versionName}.apk';
+      final file = await ApkInstaller.download(
+        up.downloadUrl!,
+        fileName: fileName,
+        onProgress: (p) => progress.value = p,
+      );
+      // 装完就不需要旧包了（保留刚下的这个，安装器还要读它）
+      unawaited(ApkInstaller.cleanOldFiles(keep: fileName));
+
+      // 下载已成功，后面即使安装失败也不该回退浏览器——那只会把同一个包再下一遍。
+      try {
+        await ApkInstaller.install(file);
+      } on UpdatePermissionException {
+        if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) _promptInstallPermission();
+        return true;
+      } catch (e) {
+        if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) _promptInstallRetry(file, e);
+        return true;
+      }
+      if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+      return true;
+    } on UpdateException catch (e) {
+      // 下载阶段的失败才回退浏览器
+      if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+      if (mounted) _toast('应用内下载失败（$e），改用浏览器下载');
+      return false;
+    } catch (e) {
+      if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+      if (mounted) _toast('应用内更新失败，改用浏览器下载');
+      return false;
+    }
+  }
+
+  /// Windows：下载 zip → 解压 → 退出应用，由脚本替换文件并重启。
+  ///
+  /// 失败同样分两段：下载/解压阶段失败回退浏览器；
+  /// 已经解压好了才失败（比如安装目录不可写）就只提示，不重复下载。
+  Future<bool> _installWindows(AppUpdate up) async {
+    final progress = ValueNotifier<double?>(0);
+    var dialogOpen = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('正在下载更新'),
+        content: ValueListenableBuilder<double?>(
+          valueListenable: progress,
+          builder: (_, value, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LinearProgressIndicator(value: value),
+              const SizedBox(height: 12),
+              Text(value == null
+                  ? '已开始下载…'
+                  : '${(value * 100).clamp(0, 100).toStringAsFixed(0)}%'),
+              const SizedBox(height: 8),
+              const Text(
+                '下载完成后需要关闭应用才能替换文件，随后会自动重启。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).then((_) => dialogOpen = false);
+
+    Directory? extracted;
+    try {
+      extracted = await WindowsInstaller.prepare(
+        up.downloadUrl!,
+        versionName: up.versionName,
+        onProgress: (p) => progress.value = p,
+      );
+    } on UpdateException catch (e) {
+      if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+      if (mounted) _toast('应用内下载失败（$e），改用浏览器下载');
+      return false;
+    } catch (e) {
+      if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+      if (mounted) _toast('应用内更新失败，改用浏览器下载');
+      return false;
+    }
+
+    if (dialogOpen && mounted) Navigator.of(context, rootNavigator: true).pop();
+    if (!mounted) return true;
+    if (!await _confirmWindowsRestart(up)) return true;
+
+    try {
+      await WindowsInstaller.applyAndRestart(extracted, versionName: up.versionName);
+    } on UpdateException catch (e) {
+      if (mounted) _toast('$e');
+      return true;
+    } catch (e) {
+      if (mounted) _toast('无法应用更新：$e');
+      return true;
+    }
+    // 更新脚本正在等本进程退出，必须真的退出它才会开始替换
+    exit(0);
+  }
+
+  /// 替换文件必须先关掉应用，所以问一句再动手。
+  Future<bool> _confirmWindowsRestart(AppUpdate up) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('更新已就绪'),
+        content: Text(
+          '新版本 ${up.versionName} 已下载完成。\n\n'
+          '完成安装需要先关闭本应用，随后会自动重新打开。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('立即更新'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
+  /// 包已下好但安装器没起来：提示重试（重试只重新拉起安装器，不重新下载）。
+  void _promptInstallRetry(File apk, Object error) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('安装未启动'),
+        content: Text(
+          '安装包已下载完成，但无法唤起系统安装器：\n$error\n\n'
+          '可以重试，或到「应用内更新」目录手动安装。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ApkInstaller.install(apk).catchError((e) {
+                if (mounted) _toast('仍然无法启动安装器：$e');
+              });
+            },
+            child: const Text('重试'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Android 8+ 需按「来源应用」授权安装未知应用。
+  void _promptInstallPermission() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('需要授权'),
+        content: const Text(
+          '系统要求先允许本应用「安装未知应用」，才能完成更新。\n\n'
+          '请在接下来的设置页中开启该权限，然后重新点击下载。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ApkInstaller.openInstallPermissionSettings();
+            },
+            child: const Text('去设置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openInBrowser(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      _toast('无法打开下载链接，请到发布页面手动下载');
+    }
+  }
+
   Future<void> _checkUpdate(BuildContext context) async {
     final text = await ref.read(contactsProvider.notifier).checkForUpdates();
     if (!context.mounted) return;
@@ -589,7 +969,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
 // ==================== 菜单动作枚举 ====================
 
-enum _MenuAction { callerId, appLock, export, about, checkUpdate, changePassword, logout }
+enum _MenuAction {
+  callerId,
+  appLock,
+  export,
+  about,
+  checkAppUpdate, // 安装包版本（走公共更新源）
+  checkUpdate, // 服务端通讯录数据版本
+  changePassword,
+  logout,
+}
 
 // ==================== 导出模式底部操作条 ====================
 

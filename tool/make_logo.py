@@ -478,12 +478,15 @@ def apply_web(key):
 
 def apply_linux(key):
     """
-    Linux 桌面：Flutter 的 linux runner 不直接吃图标，
-    图标由打包脚本（tool/build_deb.sh）从 android 的 xxxhdpi 取，这里只额外产出一份
-    hicolor 命名规范的 PNG，便于 deb/其它发行方式直接引用。
+    Linux 桌面：Flutter 的 linux runner 不直接吃图标。
+
+    实际取图路径：
+      - deb 打包（tool/build_deb.sh）从 android 的 mipmap-xxxhdpi 取
+      - 其它分发方式可直接用 logo/app_icon_256.png（下面 Windows 那步已产出）
+    所以这里不重复产出一份同内容的 PNG——原先的 app_icon_linux_256.png
+    与 app_icon_256.png 逐字节相同，属于冗余。
     """
-    print("== Linux ==")
-    save(_render_at(256), os.path.join(LOGO_DIR, "app_icon_linux_256.png"))
+    print("== Linux ==\n  图标复用 logo/app_icon_256.png（不重复产出）")
 
 
 def apply_ios(key):

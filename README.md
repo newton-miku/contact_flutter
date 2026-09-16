@@ -67,14 +67,20 @@ API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch arm64
 
 # 复用已有 build/linux 产物，只重新打包
 bash tool/build_deb.sh --skip-build
+
+# 指定版本（推荐）：版本名由 tag 推导，与 Android/Windows 同源
+TAG=v1.0.1 API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch arm64
 ```
 
-产物：`../_release/contact_flutter_<版本>_<arch>.deb`
+产物：`../_release/contact_flutter_<版本名>_<arch>.deb`
+
+> 不传 `TAG` 会直接报错：deb 的版本号不允许回退成 pubspec 里的开发期占位值，
+> 否则同一个"版本"在不同平台会对不上。
 
 安装与卸载：
 
 ```bash
-sudo dpkg -i contact_flutter_1.0.0+10000_arm64.deb || sudo apt-get -f install
+sudo dpkg -i contact_flutter_1.0.1_arm64.deb || sudo apt-get -f install
 sudo dpkg -r contact-flutter        # 卸载（包名是 contact-flutter，不是文件名）
 ```
 

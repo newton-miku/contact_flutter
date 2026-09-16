@@ -1,9 +1,22 @@
 name: contact_flutter
 description: 现代式通讯录应用，支持打电话、发短信、导出联系人到系统通讯录。
 publish_to: 'none'
-# 产品版本(versionName) + versionCode。
-# versionCode = MAJOR×10000 + MINOR×100 + PATCH（只增不回退；1.0.0 → 10000）。
-version: 1.0.0+10000
+# 开发期占位版本，【不需要为发版而修改】，也【不允许】出现在任何对外产物里。
+#
+# 正式发布完全由 tag 驱动：推一个 v1.0.0 的 tag，CI 会
+#   - 从 tag 取版本名
+#   - 用 MAJOR×10000 + MINOR×100 + PATCH 换算出 versionCode
+#   - 通过 --build-name / --build-number 覆盖本次构建
+#     （Android / Windows / Linux 三个平台都注入，见 release-gitcode.yml；
+#      桌面端的版本号分别来自 exe 的 VERSIONINFO 与 flutter_assets/version.json，
+#      不注入就会固定成这里的值，用户装了新版仍被提示"发现新版本"）
+#
+# 换算的唯一实现是 tool/derive_version.sh，发布脚本与各构建脚本都调它。
+#
+# 这里刻意写成 0.0.0：它一眼就能看出不是正式版本。本地发布脚本
+# （release_gitcode.py / build_deb.sh）在没有显式版本号时会直接报错，
+# 不会再悄悄回退到这个值——免得把 0.0.0 当成真版本发出去。
+version: 0.0.0
 
 environment:
   sdk: ^3.12.2

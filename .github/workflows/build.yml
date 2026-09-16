@@ -66,6 +66,15 @@ jobs:
     name: Android APK
     needs: check
     runs-on: ubuntu-latest
+    # 环境名跟着分支走：dev 分支用 dev 的 Environment，main 用 main 的。
+    #
+    # ⚠️ tag 推送时 github.ref_name 是【tag 名】而不是分支名，直接用它去找
+    #    "v1.0.0" 这个 Environment 时 Actions 会自动建一个【空的】，
+    #    于是环境级配置全部读不到，而工作流仍然是绿的——很难发现。
+    #    所以 tag 回退到默认分支名。
+    #
+    # 环境名【不存在时会被自动创建为空】，所以用到哪些分支就必须建哪些 Environment。
+    environment: ${{ github.ref_type == 'tag' && github.event.repository.default_branch || github.ref_name }}
     env:
       API_BASE_URL: ${{ secrets.API_BASE_URL }}
       APP_ID_SUFFIX: ${{ inputs.app_id_suffix || vars.APP_ID_SUFFIX || '' }}
@@ -106,6 +115,11 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
       - run: flutter pub get
+      # 版本号只在打 tag 时注入（与 release-gitcode.yml 共用同一个换算脚本）。
+      # 不注入就回退 pubspec 的占位值——那样的包虽然能装，但"检查更新"会一直误判。
+      - name: 由 tag 推导版本号
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bash tool/derive_version.sh "$GITHUB_REF_NAME" --github-env >> "$GITHUB_ENV"
       # NDK/CMake 只有打包原生库(.so)时才用得到；命中缓存就不必再跑 sdkmanager（省约半分钟）。
       - name: 缓存 NDK / CMake
         uses: actions/cache@v6
@@ -146,10 +160,20 @@ jobs:
       # 否则插件自带的 x86_64 .so（ML Kit）会混进默认包。
       - name: Build release APK（arm + arm64，默认包）
         run: |
+          set -euo pipefail
           SHA_SHORT=${GITHUB_SHA::7}
           BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           mkdir -p dist-apk
+          # 打 tag 时由 tag 注入版本；否则留空，回退 pubspec（开发/预览构建）
+          VER_ARGS=()
+          if [ -n "${APP_VER:-}" ]; then
+            VER_ARGS+=(--build-name="$APP_VER" --build-number="$APP_CODE")
+            echo "按 tag 注入版本：$APP_VER+$APP_CODE"
+          else
+            echo "非 tag 构建：使用 pubspec 的版本号"
+          fi
           flutter build apk --release --no-pub \
+            "${VER_ARGS[@]}" \
             --target-platform android-arm,android-arm64 \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$SHA_SHORT" \
@@ -157,9 +181,15 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk dist-apk/contact_flutter.apk
       - name: Build x86_64 APK（模拟器用）
         run: |
+          set -euo pipefail
           SHA_SHORT=${GITHUB_SHA::7}
           BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          VER_ARGS=()
+          if [ -n "${APP_VER:-}" ]; then
+            VER_ARGS+=(--build-name="$APP_VER" --build-number="$APP_CODE")
+          fi
           flutter build apk --release --no-pub \
+            "${VER_ARGS[@]}" \
             --target-platform android-x64 \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$SHA_SHORT" \
@@ -202,6 +232,8 @@ jobs:
     name: Windows x64
     needs: check
     runs-on: windows-latest
+    # 同 build-android：环境名跟分支走，tag 推送回退到默认分支（理由见上面那段注释）
+    environment: ${{ github.ref_type == 'tag' && github.event.repository.default_branch || github.ref_name }}
     env:
       API_BASE_URL: ${{ secrets.API_BASE_URL }}
     steps:
@@ -220,6 +252,11 @@ jobs:
           path: ${{ env.FLUTTER_ROOT }}/bin/cache/artifacts/engine
           key: flutter-engine-windows-${{ runner.os }}-${{ steps.flutter.outputs.version }}
       - run: flutter pub get
+      # 同 Android 作业：打 tag 时由 tag 注入版本号（换算脚本共用）
+      - name: 由 tag 推导版本号
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: bash tool/derive_version.sh "$GITHUB_REF_NAME" --github-env >> "$GITHUB_ENV"
       - name: 校验服务器地址（Secret API_BASE_URL）
         shell: pwsh
         run: |
@@ -232,7 +269,16 @@ jobs:
         run: |
           $sha = $env:GITHUB_SHA.Substring(0, 7)
           $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-          flutter build windows --release `
+          # 桌面端的版本号来自 exe 的 VERSIONINFO：不注入就固定是 pubspec 的占位值，
+          # 用户装了新版仍会被"检查更新"提示有新版本。
+          $verArgs = @()
+          if ($env:APP_VER) {
+            $verArgs = @("--build-name=$env:APP_VER", "--build-number=$env:APP_CODE")
+            Write-Host "按 tag 注入版本：$env:APP_VER+$env:APP_CODE"
+          } else {
+            Write-Host "非 tag 构建：使用 pubspec 的版本号"
+          }
+          flutter build windows --release @verArgs `
             --dart-define="API_BASE_URL=$env:API_BASE_URL" `
             --dart-define="APP_VERSION=$sha" `
             --dart-define="BUILD_TIME=$buildTime"
