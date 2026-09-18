@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # 打 Linux 桌面包（.deb），产物落到 ../_release/。
 #
+# ⚠️ 本脚本属于 linux-uos 分支：专为 UOS Desktop 20 / glibc 2.28 维护。
+#    只支持 Flutter 3.10.x —— 更新的引擎要求 glibc ≥ 2.31，在 UOS 20 上装不起来。
+#    脚本会自己校验版本，不满足直接拒绝（编出装不上的包比不编更糟）。
+#
 # 目标环境：UOS / Deepin / 麒麟 等 Debian 系国产系统，arm64 与 amd64 均可。
 #
 # 重要：Flutter 的 Linux 桌面版【不支持从 Windows 交叉编译到 arm64】。
@@ -28,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --arch=*)     ARCH="${1#--arch=}" ;;
     --arch)       ARCH="${2:-}"; shift ;;
     --skip-build) SKIP_BUILD=1 ;;
-    -h|--help)    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "未知参数：$1（可用：--arch <arm64|amd64>、--skip-build）" >&2; exit 2 ;;
   esac
   shift
@@ -41,6 +45,28 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 command -v flutter >/dev/null 2>&1 || { echo "错误：找不到 flutter，请先装 Flutter SDK 并加入 PATH。" >&2; exit 1; }
+
+# Flutter 版本闸门。
+#
+# 为什么卡死在 3.10.x：Flutter 的 Linux 桌面引擎是预编译的，它链的 glibc
+# 决定产物能跑在什么系统上。3.10.x 之后引擎要求 glibc ≥ 2.31，
+# 而 UOS Desktop 20 是 Debian 10 底子、glibc 只有 2.28
+# → 编出来的包能装上但起不来（或被依赖检查直接拒）。
+#
+# 这里主动拦一道：与其编出一个装不上的 deb，不如当场说清楚。
+FLUTTER_VER="$(flutter --version 2>/dev/null | head -1 | awk '{print $2}')"
+case "${FLUTTER_VER:-}" in
+  3.10.*) echo "==> Flutter $FLUTTER_VER（符合 UOS 20 的 glibc 2.28 要求）" ;;
+  *)
+    echo "错误：本分支只支持 Flutter 3.10.x，当前是 ${FLUTTER_VER:-未知}。" >&2
+    echo "      UOS Desktop 20 的 glibc 是 2.28；更新的 Flutter 引擎要求 glibc ≥ 2.31，" >&2
+    echo "      产物在 UOS 上装不起来，所以这里直接拒绝。" >&2
+    echo "      装 3.10.6：" >&2
+    echo "        curl -LO https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.10.6-stable.tar.xz" >&2
+    echo "        tar xf flutter_linux_3.10.6-stable.tar.xz -C ~/ && export PATH=\"\$HOME/flutter/bin:\$PATH\"" >&2
+    echo "      确认：flutter --version 应显示 3.10.6" >&2
+    exit 1 ;;
+esac
 
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in

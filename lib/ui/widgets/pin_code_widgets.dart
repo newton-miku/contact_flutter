@@ -151,13 +151,13 @@ class _PadKey extends StatelessWidget {
     final text = Theme.of(context).textTheme.titleLarge?.copyWith(
           fontSize: 24,
           fontWeight: FontWeight.w600,
-          color: enabled ? color.onSurface : color.onSurface.withValues(alpha: 0.35),
+          color: enabled ? color.onSurface : color.onSurface.withOpacity(0.35),
         );
     return Material(
       color: enabled
           ? (Theme.of(context).brightness == Brightness.dark
-              ? Colors.white.withValues(alpha: 0.08)
-              : color.surfaceContainerHighest.withValues(alpha: 0.6))
+              ? Colors.white.withOpacity(0.08)
+              : color.surfaceVariant.withOpacity(0.6))
           : Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(

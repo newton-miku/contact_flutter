@@ -110,7 +110,7 @@ class _AppLockSettingsScreenState
     final state = ref.watch(appLockProvider);
 
     return Scaffold(
-      backgroundColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      backgroundColor: colorScheme.surfaceVariant.withOpacity(0.3),
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         title: Text('应用锁',

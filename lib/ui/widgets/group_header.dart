@@ -28,7 +28,7 @@ class GroupHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 8),
       child: Material(
-        color: colorScheme.primaryContainer.withValues(alpha: 0.55),
+        color: colorScheme.primaryContainer.withOpacity(0.55),
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
@@ -43,7 +43,7 @@ class GroupHeader extends StatelessWidget {
                   height: 36,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: colorScheme.onPrimaryContainer.withValues(alpha: 0.1),
+                    color: colorScheme.onPrimaryContainer.withOpacity(0.1),
                   ),
                   child: Icon(
                     Icons.groups,
@@ -68,7 +68,7 @@ class GroupHeader extends StatelessWidget {
                             ? '$selectedCount/${contacts.length} 已选'
                             : '${contacts.length} 人',
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onPrimaryContainer.withValues(alpha: 0.7),
+                          color: colorScheme.onPrimaryContainer.withOpacity(0.7),
                         ),
                       ),
                     ],
@@ -85,7 +85,7 @@ class GroupHeader extends StatelessWidget {
                           ? colorScheme.primary
                           : someSelected
                               ? colorScheme.tertiary
-                              : colorScheme.onPrimaryContainer.withValues(alpha: 0.08),
+                              : colorScheme.onPrimaryContainer.withOpacity(0.08),
                     ),
                     child: allSelected
                         ? Icon(Icons.check, size: 16, color: colorScheme.onPrimary)

@@ -24,6 +24,12 @@ linter:
     avoid_print: false
     prefer_const_constructors: true
     prefer_const_literals_to_create_immutables: true
+    # linux-uos 分支专用：这里跟着 Flutter 3.10 用的是 flutter_lints 2.x，
+    # 而旧版这条规则还不认识 `context.mounted` 这个守卫（Flutter 3.7 才引入），
+    # 于是把「await 之后已经写了 if (!context.mounted) return;」的地方也报成
+    # 跨 async 使用 BuildContext —— 纯误报，代码本身是有守卫的。
+    # 等这条分支跟随 main 升级 lint 后再打开。
+    use_build_context_synchronously: false
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

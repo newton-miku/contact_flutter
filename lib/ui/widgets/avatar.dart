@@ -22,7 +22,7 @@ class Avatar extends StatelessWidget {
         shape: BoxShape.circle,
         color: isSelected ? colorScheme.primary : colorScheme.primaryContainer,
         border: isSelected
-            ? Border.all(color: colorScheme.primary.withValues(alpha: 0.4), width: 2)
+            ? Border.all(color: colorScheme.primary.withOpacity(0.4), width: 2)
             : null,
       ),
       alignment: Alignment.center,

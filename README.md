@@ -1,5 +1,40 @@
 # contact_flutter — 通讯录客户端
 
+> ## ⚠️ 你在看的是 `linux-uos` 分支
+>
+> 这条分支**只为给 UOS Desktop 20 打 Linux `.deb`**，与 `main` 的用途不同，两边不合并。
+>
+> | | `main` | `linux-uos` |
+> |---|---|---|
+> | Flutter | 3.44.8（Dart 3.12） | **3.10.6（Dart 3.0.6）** |
+> | 平台 | Android + Windows | **仅 Linux** |
+> | 依赖 | 新版 | 整体锚定 2023 年中 |
+> | CI | GitHub Actions | 无 |
+>
+> **为什么卡在 3.10.6**：Flutter 的 Linux 桌面引擎是预编译产物，它自己链的 glibc
+> 决定产物能跑在哪。3.10.x 之后引擎要求 glibc ≥ 2.31，而 UOS Desktop 20 是
+> Debian 10 底子、glibc 只有 **2.28** → 更新的 Flutter 编出来装不上。
+>
+> 由此带来的连锁约束：Dart 从 3.0 到 3.12 跨了一整个大版本，`main` 上钉的依赖
+> （`cupertino_icons` / `intl` / `shared_preferences` 等）普遍要求 Dart ≥3.9，
+> 在 3.0.6 上解不出来。所以**本分支的 `pubspec.yaml` 与 `pubspec.lock` 与 main 不同，
+> 不要互相照抄**；代码里也把 `withValues` / `surfaceContainer*` / `CardThemeData` /
+> `LinearProgressIndicator.borderRadius` 等 3.10 之后才有的 API 换成了旧写法。
+>
+> 构建（必须在 UOS 机器上，Flutter 桌面版不支持跨平台编译）：
+>
+> ```bash
+> # 装 Flutter 3.10.6
+> curl -LO https://storage.flutter-io.cn/flutter_infra_release/releases/stable/linux/flutter_linux_3.10.6-stable.tar.xz
+> tar xf flutter_linux_3.10.6-stable.tar.xz -C ~/ && export PATH="$HOME/flutter/bin:$PATH"
+> flutter --version          # 必须是 3.10.6，脚本会校验
+>
+> # 打 deb（版本号由 tag 推导，与 Android/Windows 同源）
+> TAG=v1.0.1 API_BASE_URL=https://你的服务器 bash tool/build_deb.sh --arch amd64
+> ```
+>
+> 维护方式：`main` 继续跑现代 Flutter；这边只 cherry-pick 需要的修复。
+
 县域单位通讯录的 Flutter 客户端（Android 手机端 + Windows 桌面端）。
 功能：按单位分组浏览 / 拼音搜索 / 一键呼叫与短信 / 导出到系统通讯录 / **安卓来电显示名片** /
 应用锁 / 设备激活（一次性激活码）与桌面端账号密码登录。

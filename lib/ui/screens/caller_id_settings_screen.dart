@@ -238,7 +238,7 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                  color: Theme.of(ctx).colorScheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const SelectableText(_roleAdbCommand,
@@ -443,7 +443,7 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
     _maybePickDefaultTestTarget();
 
     return Scaffold(
-      backgroundColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      backgroundColor: colorScheme.surfaceVariant.withOpacity(0.3),
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         title: Text('来电显示',
@@ -928,7 +928,7 @@ class _CallerIdSettingsScreenState extends ConsumerState<CallerIdSettingsScreen>
             ],
           ),
         ),
-        ?trailing,
+        if (trailing != null) trailing,
       ],
     );
   }
@@ -972,7 +972,7 @@ class _ResultBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -1035,7 +1035,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
     final results = _filtered;
     return SafeArea(
       child: Material(
-        color: colorScheme.surfaceContainerLowest,
+        color: colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -1199,7 +1199,7 @@ class _PermissionBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Card(
-      color: colorScheme.errorContainer.withValues(alpha: 0.5),
+      color: colorScheme.errorContainer.withOpacity(0.5),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
         child: Column(

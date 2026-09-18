@@ -43,7 +43,7 @@ class _ContactSearchBarState extends State<ContactSearchBar> {
           )
               : null,
           filled: true,
-          fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+          fillColor: colorScheme.surfaceVariant.withOpacity(0.6),
           contentPadding: const EdgeInsets.symmetric(vertical: 12),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),

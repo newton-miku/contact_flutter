@@ -58,7 +58,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
-            errorBuilder: (context, error) {
+            // mobile_scanner 3.x 的 errorBuilder 有三个参数（多一个 child）
+            errorBuilder: (context, error, _) {
               final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
               if (denied && !_permissionDenied) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 应用内安装更新用的 FileProvider 路径授权。
-     只暴露 apk_downloads 这一个子目录，避免把应用私有目录整体开放出去。 -->
-<paths>
-    <!-- 与 ApkInstaller.kt 里用的目录名保持一致：getExternalFilesDir("apk_downloads") -->
-    <external-files-path name="apk_downloads" path="apk_downloads/" />
-    <!-- 兜底：万一外部存储不可用，下载会落到内部私有目录 -->
-    <files-path name="apk_files" path="apk_downloads/" />
-</paths>

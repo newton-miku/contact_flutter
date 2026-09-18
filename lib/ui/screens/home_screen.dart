@@ -127,7 +127,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         state.contacts.isNotEmpty && state.selectedCount == state.contacts.length;
 
     return Scaffold(
-      backgroundColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      backgroundColor: colorScheme.surfaceVariant.withOpacity(0.3),
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         // 导出模式下用返回箭头退出（若已有勾选会先确认），其余时间无 leading。
@@ -729,7 +729,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         title: const Text('正在下载更新'),
         content: ValueListenableBuilder<double?>(
           valueListenable: progress,
-          builder: (_, value, _) => Column(
+          builder: (_, value, __) => Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -795,7 +795,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         title: const Text('正在下载更新'),
         content: ValueListenableBuilder<double?>(
           valueListenable: progress,
-          builder: (_, value, _) => Column(
+          builder: (_, value, __) => Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1008,7 +1008,7 @@ class _ExportModeBar extends StatelessWidget {
         color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, -4),
           ),
@@ -1037,11 +1037,15 @@ class _ExportModeBar extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  LinearProgressIndicator(
-                    value: total > 0 ? count / total : 0,
-                    backgroundColor: colorScheme.surfaceContainerHighest,
+                  ClipRRect(
+                    // 3.10 的 LinearProgressIndicator 还没有 borderRadius 参数，
+                    // 用 ClipRRect 保住圆角外观
                     borderRadius: BorderRadius.circular(3),
-                    minHeight: 5,
+                    child: LinearProgressIndicator(
+                      value: total > 0 ? count / total : 0,
+                      backgroundColor: colorScheme.surfaceVariant,
+                      minHeight: 5,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(

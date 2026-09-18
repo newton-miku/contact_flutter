@@ -22,7 +22,7 @@ class ExportBottomBar extends StatelessWidget {
         color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, -4),
           ),
@@ -42,11 +42,14 @@ class ExportBottomBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                LinearProgressIndicator(
-                  value: totalCount > 0 ? selectedCount / totalCount : 0,
-                  backgroundColor: colorScheme.surfaceContainerHighest,
+                ClipRRect(
+                  // 3.10 的 LinearProgressIndicator 还没有 borderRadius 参数
                   borderRadius: BorderRadius.circular(3),
-                  minHeight: 6,
+                  child: LinearProgressIndicator(
+                    value: totalCount > 0 ? selectedCount / totalCount : 0,
+                    backgroundColor: colorScheme.surfaceVariant,
+                    minHeight: 6,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(

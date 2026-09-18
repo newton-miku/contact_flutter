@@ -1,58 +1,66 @@
 name: contact_flutter
 description: 现代式通讯录应用，支持打电话、发短信、导出联系人到系统通讯录。
 publish_to: 'none'
-# 开发期占位版本，【不需要为发版而修改】，也【不允许】出现在任何对外产物里。
+
+# ⚠️⚠️ 这是 linux-uos 分支，与 main 的用途不同 ⚠️⚠️
 #
-# 正式发布完全由 tag 驱动：推一个 v1.0.0 的 tag，CI 会
-#   - 从 tag 取版本名
-#   - 用 MAJOR×10000 + MINOR×100 + PATCH 换算出 versionCode
-#   - 通过 --build-name / --build-number 覆盖本次构建
-#     （Android / Windows / Linux 三个平台都注入，见 .github/workflows/build.yml；
-#      桌面端的版本号分别来自 exe 的 VERSIONINFO 与 flutter_assets/version.json，
-#      不注入就会固定成这里的值，用户装了新版仍被提示"发现新版本"）
+# 本分支专为【UOS Desktop 20 Professional / Debian 10 底子 / glibc 2.28】维护，
+# 只用来打 Linux 的 .deb。原因：
+#   Flutter 的 Linux 桌面引擎是预编译产物，它自己链的 glibc 决定了产物能跑在哪。
+#   Flutter 3.10.x 之后引擎要求 glibc ≥ 2.31，而 UOS 20 只有 2.28 → 直接跑不起来。
+#   所以这条线【只能用 Flutter 3.10.x】（自带 Dart 3.0.6）。
 #
-# 换算的唯一实现是 tool/derive_version.sh，发布脚本与各构建脚本都调它。
+# 由此带来的连锁约束：Dart 从 3.0 到 3.12 跨了一整个大版本，
+# main 上钉的依赖（cupertino_icons/intl/shared_preferences 等）
+# 普遍要求 Dart ≥3.9，在 3.0.6 上根本解不出来，
+# 所以本分支的依赖整体锚定在 2023 年中的版本——【不要照抄 main 的 pubspec】。
 #
-# 这里刻意写成 0.0.0：它一眼就能看出不是正式版本。本地发布脚本
-# （release_gitcode.py / build_deb.sh）在没有显式版本号时会直接报错，
-# 不会再悄悄回退到这个值——免得把 0.0.0 当成真版本发出去。
+# 维护方式：main 继续跑现代 Flutter（Android / Windows / CI），
+# 这边只挑需要的修复 cherry-pick 过来，两边不合并。
+#
+# 版本号：同 main，由 tag 注入，pubspec 里的 0.0.0 只是开发期占位。
 version: 0.0.0
 
 environment:
-  sdk: ^3.12.2
+  # Dart 3.0.6 是 Flutter 3.10.6 自带的版本
+  sdk: ">=3.0.0 <4.0.0"
+  # 刻意把 Flutter 也钉住：用更新的 SDK 会在 pub get 阶段就被拦下，
+  # 免得编出一个"能构建但装到 UOS 上跑不起来"的包。
+  flutter: ">=3.10.0 <3.11.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
   # UI
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^1.0.2
 
   # State management
-  flutter_riverpod: ^2.6.1
+  flutter_riverpod: ^2.4.0
 
   # Network & 本地缓存
-  http: ^1.2.2
-  shared_preferences: ^2.3.3
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
 
   # System APIs (打电话、发短信、打开设置)
-  url_launcher: ^6.3.1
-  permission_handler: ^11.3.1
+  url_launcher: ^6.1.0
+  permission_handler: ^10.4.0
 
   # 生物认证
-  local_auth: ^2.3.0
+  local_auth: ^2.1.0
 
   # Utilities
-  collection: ^1.19.0
-  intl: ^0.20.2
-  pinyin: ^3.3.0
-  crypto: ^3.0.7
-  package_info_plus: ^10.2.1
-  mobile_scanner: ^7.4.0
+  collection: ^1.17.0
+  # intl 必须留在 0.18.x：Flutter 3.10 的 flutter_localizations 锁的就是它
+  intl: ^0.18.0
+  pinyin: ^3.2.0
+  crypto: ^3.0.3
+  package_info_plus: ^4.2.0
+  mobile_scanner: ^3.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^2.0.0
 
 flutter:
   uses-material-design: true
