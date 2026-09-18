@@ -212,6 +212,26 @@ if [[ ! -x "$BUNDLE_DIR/$PKG_NAME" ]]; then
   exit 1
 fi
 
+# ---------------- 1.5 修 version.json ----------------
+# 桌面端的 PackageInfo 在 Linux 上读的是 bundle 里的 data/flutter_assets/version.json，
+# 而生成它的 flutter_tools getVersionInfo()（project.dart）只认 pubspec 里的 version，
+# **不走** --build-name/--build-number 那套 buildInfo 覆盖（Android 的 gradle_utils 和
+# Windows 的 cmake 都走 buildInfo，所以只有 Linux/web 会中招；3.10.6 和 3.44.8 一个样）。
+# 后果：deb 叫 1.0.1，App 内的版本号却是 pubspec 的占位值 0.0.0——更新检查也会因此
+# 一直认为"有新版本"。这里按 TAG 推导出的版本直接改写它。
+VERSION_JSON="$BUNDLE_DIR/data/flutter_assets/version.json"
+if [[ ! -d "$(dirname "$VERSION_JSON")" ]]; then
+  echo "错误：找不到 $(dirname "$VERSION_JSON")，bundle 不完整。" >&2
+  exit 1
+fi
+printf '{"app_name":"%s","version":"%s","build_number":"%s","package_name":"%s"}\n' \
+  "$PKG_NAME" "$APP_VER" "$APP_CODE" "$PKG_NAME" > "$VERSION_JSON"
+if ! grep -q "\"version\":\"$APP_VER\"" "$VERSION_JSON"; then
+  echo "错误：version.json 注入失败（$VERSION_JSON）。" >&2
+  exit 1
+fi
+echo "==> version.json 已注入 $APP_VER（versionCode $APP_CODE）"
+
 # ---------------- 2. 组织 deb 目录树 ----------------
 echo "==> 组装包目录 $STAGE"
 rm -rf "$STAGE"

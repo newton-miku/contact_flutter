@@ -126,6 +126,7 @@ sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
 | `packaging/linux/contact_flutter.launcher` | 覆盖 `GDK_BACKEND=wayland` + `GDK_GL=gles` | 厂商 GL 栈只实现 GLES，GTK 默认走 X11 + 桌面版 GL，引擎拿不到 `GL_VERSION` 就 abort，见「常见问题」第 8 条 |
 | `assets/fonts/NotoSansSC-Regular.otf` + `pubspec.yaml` 的 `flutter.fonts` + `lib/main.dart` 的 `fontFamily` | 内置一份中文字体并设为默认字体 | **ARM64 Linux 的官方引擎没链接 Fontconfig**，取不到任何系统字体，中文全是方框，见「常见问题」第 9 条 |
 | `tool/build_deb.sh` | 校验 bundle 里有内置字体；把 OFL 许可证装到 `/usr/share/doc/` | 字体没进 bundle 就白搭；Noto 是 OFL 授权，再分发必须带许可证 |
+| `tool/build_deb.sh` | 构建之后按 TAG 改写 `data/flutter_assets/version.json` 并读回校验 | Flutter 的 `getVersionInfo()` 只读 pubspec，Linux 上 `--build-name` 根本不生效，App 内版本恒为 `0.0.0`，见「常见问题」第 10 条 |
 | 平台目录 | 只保留 `linux/` | 3.10 的 `isUsingGradle` 只看 `build.gradle`、**不认 `.kts`**，留着 Android 工程会被误判成 v1 嵌入 |
 | `.metadata` | 不再登记已删平台 | 免得 `flutter create/migrate` 去找不存在的平台 |
 
@@ -277,6 +278,34 @@ dpkg -L contact-flutter | grep -i doc        # OFL 许可证
 
 需要注意的副作用：Flutter 会给没有粗体字面的家族做**合成粗体**，所以我们只随包发了一个
 字重。要真粗体就得再塞一份 Bold（再加 8MB），目前不值当。
+
+### 10. App 内的版本号一直是 `0.0.0`（deb 却是 1.0.1）
+
+不是编译方式的问题，是 Flutter 工具链的 bug。`PackageInfo` 在 Linux 上读的是
+`data/flutter_assets/version.json`（`package_info_plus` 的 Linux 实现按 `/proc/self/exe`
+定位该文件），而这个文件由 `flutter_tools` 的 `getVersionInfo()` 生成——它取的是
+`manifest.buildName`，也就是**只认 pubspec 里的 `version:`**：
+
+| 平台 | 取值处 | 认 `--build-name` 吗 |
+|---|---|---|
+| Android | `gradle_utils.dart`：`buildInfo.buildName ?? manifest.buildName` | 认 |
+| Windows | `cmake.dart`：`buildInfo.buildName ?? manifest.buildName` | 认 |
+| Linux / web | `project.dart`：`manifest.buildName` | **不认** |
+
+`pubspec.yaml` 里是有意的开发期占位值 `version: 0.0.0`（真版本由 tag 推导），所以 Linux 上
+不管怎么传 `TAG`，App 内都会是 0.0.0，而 deb 的版本号来自 TAG——两边对不上。还有两个副作用：
+About 页的「构建号」那一行不会出现（`version.json` 里没有 `build_number` 键），更新检查也会
+一直认为有新版本（`0.0.0` 永远小于线上的 `1.0.1`）。
+
+`tool/build_deb.sh` 现在会在构建之后按 TAG 改写这个文件，并读回来校验：
+
+```bash
+cat build/linux/arm64/release/bundle/data/flutter_assets/version.json
+cat /opt/contact_flutter/data/flutter_assets/version.json      # 装完以后
+# 期望 {"app_name":"contact_flutter","version":"1.0.1","build_number":"10001",...}
+```
+
+`--skip-build` 复用的是已有 bundle，所以改写那一步照样会执行——这正是它该做的。
 
 ---
 
