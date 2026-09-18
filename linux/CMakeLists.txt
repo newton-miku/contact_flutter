@@ -106,11 +106,15 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
-# Copy the native assets provided by the build.dart from all packages.
-set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
-install(DIRECTORY "${NATIVE_ASSETS_DIR}"
-   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-   COMPONENT Runtime)
+# linux-uos 分支：这里删掉了新版模板的 "native assets" 安装块
+#
+#   set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
+#   install(DIRECTORY "${NATIVE_ASSETS_DIR}" ...)
+#
+# native assets 是 Flutter 3.10 之后才有的机制，3.10 不会产出那个目录，
+# 而 install(DIRECTORY <不存在的目录>) 会在安装阶段直接报
+# "file INSTALL cannot find ..."，构建走到最后才失败。
+# 本分支不用 native assets，整块去掉。
 
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
