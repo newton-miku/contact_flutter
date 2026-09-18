@@ -4,8 +4,7 @@
 # 为什么要包一层：
 #   1. Flutter 桌面版的 .so 放在 bundle 的 lib/ 下，用 $ORIGIN 相对路径加载；
 #      从桌面图标启动时工作目录不确定，这里显式补 LD_LIBRARY_PATH 更稳。
-#   2. 国产系统（UOS/麒麟）常见于虚拟机、国产 GPU 环境，GPU 驱动不一定完整；
-#      若出现白屏/黑屏，可设置 LIBGL_ALWAYS_SOFTWARE=1 走软件渲染（见 README）。
+#   2. 强制 GTK 去要 GLES 上下文，见下面的 GDK_GL。
 #   3. 把命令行参数原样透传给应用。
 
 BUNDLE_DIR="/opt/contact_flutter"
@@ -18,5 +17,13 @@ fi
 
 LD_LIBRARY_PATH="$BUNDLE_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH
+
+# 国产 GL 栈（实测：UOS aarch64 + 海思 libGFX_hisi）通常只实现 GLES，而 GTK 默认
+# 会去要一份「桌面版 OpenGL」上下文。拿到的上下文不可用，glGetString(GL_VERSION)
+# 返回 NULL，Flutter 引擎随即 abort：
+#   [FATAL:flutter/shell/gpu/gpu_surface_gl_delegate.cc(57)] Check failed: gl_version_string.
+# 逼 GTK 要 GLES 上下文即可绕过。想用 GTK 默认行为就自己 export GDK_GL=gl。
+: "${GDK_GL:=gles}"
+export GDK_GL
 
 exec "$BIN" "$@"
