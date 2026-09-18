@@ -68,6 +68,32 @@ case "${FLUTTER_VER:-}" in
     exit 1 ;;
 esac
 
+# 平台目录残留检查。
+#
+# 本分支没有 android/ios/macos/windows 工程。但如果你之前在 main 上工作过，
+# 切分支时这些目录里【未跟踪】的残留（gradlew、签名配置、ephemeral/ 等）会留在磁盘上，
+# 于是目录还在、里面的工程文件却没了。
+#
+# 这会让 Flutter 3.10 走进一条很坑的路径：它的 isUsingGradle 只看
+# `android/build.gradle`（不认 .kts），判定"没用 Gradle"后转去读
+# `android/AndroidManifest.xml`——文件不存在 → 判成 v1 Android 嵌入 →
+# pub get 直接失败并报「请把 App 迁移到 v2 嵌入」，和真实原因毫无关系。
+#
+# 与其让人去猜那句话，不如在这里直接说清楚。
+RESIDUE=""
+for d in android ios macos windows; do
+  [[ -d "$d" ]] && RESIDUE="${RESIDUE} ${d}"
+done
+if [[ -n "$RESIDUE" ]]; then
+  echo "错误：检测到残留的平台目录：${RESIDUE}" >&2
+  echo "      本分支只需要 linux/。Flutter 3.10 见到 android/ 却找不到 build.gradle 时，" >&2
+  echo "      会误判成 v1 Android 嵌入，pub get 会报一句和真因无关的" >&2
+  echo "      「requires your app to be migrated to the Android embedding v2」。" >&2
+  echo "      处理：rm -rf android ios macos windows" >&2
+  echo "      ⚠️ android/key.properties 与 android/release.jks 是未跟踪文件，删前请自行备份。" >&2
+  exit 1
+fi
+
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in
   aarch64|arm64) HOST_DEB_ARCH="arm64" ;;

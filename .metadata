@@ -4,35 +4,23 @@
 # This file should be version controlled and should not be manually edited.
 
 version:
-  revision: "058e0af2c2b57e369d905a03ac9748b0ebf543c6"
+  # linux-uos 分支固定在 Flutter 3.10.6（UOS 20 的 glibc 2.28 跑不了更新的引擎）
+  revision: "f468f3366c26a5092eb964a230ce7892fda8f2f8"
   channel: "stable"
 
 project_type: app
 
 # Tracks metadata for the flutter migrate command
 migration:
+  # 本分支只保留 Linux：android / ios / macos / web / windows 的工程目录已删除，
+  # 这里也不再登记它们（否则 flutter create/migrate 会去找不存在的平台）。
   platforms:
     - platform: root
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-    - platform: android
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-    - platform: ios
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
+      create_revision: f468f3366c26a5092eb964a230ce7892fda8f2f8
+      base_revision: f468f3366c26a5092eb964a230ce7892fda8f2f8
     - platform: linux
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-    - platform: macos
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-    - platform: web
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-    - platform: windows
-      create_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
-      base_revision: 058e0af2c2b57e369d905a03ac9748b0ebf543c6
+      create_revision: f468f3366c26a5092eb964a230ce7892fda8f2f8
+      base_revision: f468f3366c26a5092eb964a230ce7892fda8f2f8
 
   # User provided section
 
@@ -42,4 +30,3 @@ migration:
   # Files that are not part of the templates will be ignored by default.
   unmanaged_files:
     - 'lib/main.dart'
-    - 'ios/Runner.xcodeproj/project.pbxproj'

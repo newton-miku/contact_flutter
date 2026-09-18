@@ -34,6 +34,17 @@
 > ```
 >
 > 维护方式：`main` 继续跑现代 Flutter；这边只 cherry-pick 需要的修复。
+>
+> **切分支的人注意**：本分支没有 `android/` 等工程目录，但你在 `main` 上工作过之后
+> 切过来时，那些目录里**未跟踪**的残留（签名配置、gradle wrapper 等）会留在磁盘上。
+> Flutter 3.10 见到 `android/` 目录、里面却没有 `build.gradle` 时，会把它误判成
+> v1 Android 嵌入，`pub get` 报的是一句与真因毫无关系的
+> 「requires your app to be migrated to the Android embedding v2」。
+> `tool/build_deb.sh` 会在构建前检查并直接说清楚；手动处理就是：
+>
+> ```bash
+> rm -rf android ios macos windows     # 先备份 android/key.properties 与 release.jks
+> ```
 
 县域单位通讯录的 Flutter 客户端（Android 手机端 + Windows 桌面端）。
 功能：按单位分组浏览 / 拼音搜索 / 一键呼叫与短信 / 导出到系统通讯录 / **安卓来电显示名片** /
