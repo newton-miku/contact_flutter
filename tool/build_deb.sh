@@ -231,9 +231,11 @@ install -m 0755 "packaging/linux/$PKG_NAME.launcher" "$STAGE/opt/$PKG_NAME/$PKG_
 install -m 0644 "packaging/linux/$PKG_NAME.desktop" \
   "$STAGE/usr/share/applications/$PKG_NAME.desktop"
 
-# 2.4 图标：优先用仓库里最大的 launcher 图（Android xxxhdpi 那版）
+# 2.4 图标：packaging/linux/<pkg>.png 优先（本分支没有 android/ 工程），
+#     老分支/主干才回落到 Android 的 mipmap
 ICON_SRC=""
-for c in android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
+for c in "packaging/linux/$PKG_NAME.png" \
+         android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
          android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png \
          android/app/src/main/res/mipmap-xhdpi/ic_launcher.png; do
   [[ -f "$c" ]] && { ICON_SRC="$c"; break; }
@@ -245,7 +247,13 @@ else
   echo "    警告：没找到图标 png，桌面条目可能显示为空白图标。"
 fi
 
-# 2.5 DEBIAN 元数据
+# 2.5 /usr/bin 入口：应用装在 /opt 下，而 /opt 不在 PATH 里，
+#     没有这个软链，桌面条目的 Exec 会因为找不到命令而被菜单藏起来
+mkdir -p "$STAGE/usr/bin"
+ln -sf "/opt/$PKG_NAME/$PKG_NAME" "$STAGE/usr/bin/$PKG_NAME"
+echo "    命令入口：/usr/bin/$PKG_NAME -> /opt/$PKG_NAME/$PKG_NAME"
+
+# 2.6 DEBIAN 元数据
 SIZE_KB="$(du -sk "$STAGE" | cut -f1)"
 sed -e "s/@VERSION@/$APP_VERSION/g" \
     -e "s/@ARCH@/$ARCH/g" \
