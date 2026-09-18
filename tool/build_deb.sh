@@ -95,9 +95,15 @@ if [[ -n "$RESIDUE" ]]; then
 fi
 
 HOST_ARCH="$(uname -m)"
+# FLUTTER_ARCH 是 Flutter 自己那套目录命名，与 uname 的完全不同，别混用：
+#   见 flutter_tools/lib/src/build_info.dart 的 getNameForHostPlatformArch
+#     HostPlatform.linux_arm64 → 'arm64'
+#     HostPlatform.linux_x64   → 'x64'
+#   产物在 build/linux/<FLUTTER_ARCH>/<mode>/bundle/
+# 而 deb 的 Architecture 字段用的才是 Debian 那套（arm64 / amd64）。
 case "$HOST_ARCH" in
-  aarch64|arm64) HOST_DEB_ARCH="arm64" ;;
-  x86_64|amd64)  HOST_DEB_ARCH="amd64" ;;
+  aarch64|arm64) HOST_DEB_ARCH="arm64"; FLUTTER_ARCH="arm64" ;;
+  x86_64|amd64)  HOST_DEB_ARCH="amd64"; FLUTTER_ARCH="x64"  ;;
   *) echo "错误：不支持的宿主架构 $HOST_ARCH。" >&2; exit 1 ;;
 esac
 
@@ -168,7 +174,8 @@ VERSION_ARGS=(--build-name="$APP_VER" --build-number="$APP_CODE")
 BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 SHA_SHORT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 
-BUNDLE_DIR="build/linux/$HOST_ARCH/release/bundle"
+# 用 FLUTTER_ARCH（arm64 / x64），不是 uname 的 aarch64 / x86_64
+BUNDLE_DIR="build/linux/$FLUTTER_ARCH/release/bundle"
 OUT_DIR="../_release"
 PKG_NAME="contact_flutter"
 # deb 版本用版本名即可（Debian 的版本比较能正确处理 1.0.1 < 1.0.2）
@@ -191,7 +198,19 @@ else
     --dart-define=BUILD_TIME="$BUILD_TIME"
 fi
 
-[[ -x "$BUNDLE_DIR/$PKG_NAME" ]] || { echo "错误：未找到 $BUNDLE_DIR/$PKG_NAME" >&2; exit 1; }
+if [[ ! -x "$BUNDLE_DIR/$PKG_NAME" ]]; then
+  echo "错误：未找到 $BUNDLE_DIR/$PKG_NAME" >&2
+  # 把实际存在的目录列出来：Flutter 与 uname 两套架构命名不一致，
+  # 这类"路径对不上"如果只报一句 not found，排查起来很费时间。
+  echo "      build/linux/ 下实际有的是：" >&2
+  if [[ -d build/linux ]]; then
+    ls -1 build/linux | sed 's/^/        /' >&2
+  else
+    echo "        （build/linux 不存在，flutter build linux 可能没成功）" >&2
+  fi
+  echo "      期望路径用的是 FLUTTER_ARCH=$FLUTTER_ARCH（不是 uname 的 $HOST_ARCH）" >&2
+  exit 1
+fi
 
 # ---------------- 2. 组织 deb 目录树 ----------------
 echo "==> 组装包目录 $STAGE"
