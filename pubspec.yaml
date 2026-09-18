@@ -64,3 +64,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # ARM64 Linux 的官方 Flutter 引擎（< 3.50.0）没有链接 Fontconfig，引擎取不到任何系统
+  # 字体，所有文字都画成方框。资产字体走 Skia 直接加载，不经 Fontconfig，所以必须自带一份
+  # 中文字体。详见 BUILD-linux-uos.md。
+  fonts:
+    - family: ContactCJK
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.otf

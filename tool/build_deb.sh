@@ -253,7 +253,20 @@ mkdir -p "$STAGE/usr/bin"
 ln -sf "/opt/$PKG_NAME/$PKG_NAME" "$STAGE/usr/bin/$PKG_NAME"
 echo "    命令入口：/usr/bin/$PKG_NAME -> /opt/$PKG_NAME/$PKG_NAME"
 
-# 2.6 DEBIAN 元数据
+# 2.6 内置中文字体：ARM64 Linux 的官方引擎没链接 Fontconfig，取不到任何系统字体，
+#     全靠随包分发的资产字体。它没进 bundle 的话中文就是一片方框。
+FONT_IN_BUNDLE="$BUNDLE_DIR/data/flutter_assets/assets/fonts/NotoSansSC-Regular.otf"
+if [[ -f "$FONT_IN_BUNDLE" ]]; then
+  echo "    内置字体：$FONT_IN_BUNDLE ($(du -h "$FONT_IN_BUNDLE" | cut -f1))"
+else
+  echo "    警告：bundle 里没有内置中文字体，ARM64 Linux 上中文会显示为方框。" >&2
+  echo "          检查 pubspec.yaml 的 flutter.fonts 段与 assets/fonts/ 是否还在。" >&2
+fi
+mkdir -p "$STAGE/usr/share/doc/$PKG_NAME"
+install -m 0644 assets/fonts/LICENSE-OFL.txt \
+  "$STAGE/usr/share/doc/$PKG_NAME/LICENSE-NotoSansSC.txt"
+
+# 2.7 DEBIAN 元数据
 SIZE_KB="$(du -sk "$STAGE" | cut -f1)"
 sed -e "s/@VERSION@/$APP_VERSION/g" \
     -e "s/@ARCH@/$ARCH/g" \

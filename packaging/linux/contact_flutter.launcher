@@ -22,15 +22,19 @@ export LD_LIBRARY_PATH
 # 系统上默认会走 X11 + 桌面版 OpenGL。这样拿到的上下文里 glGetString(GL_VERSION)
 # 返回 NULL，Flutter 引擎随即 abort：
 #   [FATAL:flutter/shell/gpu/gpu_surface_gl_delegate.cc(57)] Check failed: gl_version_string.
-# 实测这台机器上只有「Wayland 后端 + GLES」能起来，两者缺一不可：
-#   GDK_GL=gles           → 仍然 abort
-#   GDK_BACKEND=wayland   → 单用没试，但 GLES 是必要条件
-#   GDK_BACKEND=wayland GDK_GL=gles → 可用
-# 只在真有 Wayland 会话时才钉住；纯 X11 机器保持 GTK 默认，避免误伤正常显卡。
-# 想覆盖就自己 export GDK_BACKEND / GDK_GL。
-if [ -n "$WAYLAND_DISPLAY" ]; then
-  : "${GDK_BACKEND:=wayland}"
-  : "${GDK_GL:=gles}"
+#
+# 实测矩阵（同一份二进制）：
+#   GDK_BACKEND=x11 GDK_GL=gles       → abort
+#   GDK_GL=gles（后端仍是 X11）        → abort
+#   GDK_BACKEND=wayland GDK_GL=gles   → 可用
+#
+# 这里是「覆盖」而不是「默认」：DDE 会话本身就预置了 GDK_BACKEND=x11，用 ${VAR:=...}
+# 会被它挡住、等于没设（第一版启动器就是这么失效的）。
+# 只在真有 Wayland 会话时才覆盖；纯 X11 机器保持 GTK 默认，避免误伤正常显卡。
+# 想让 GTK 自己决定：CONTACT_FLUTTER_KEEP_GDK=1
+if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$CONTACT_FLUTTER_KEEP_GDK" ]; then
+  GDK_BACKEND=wayland
+  GDK_GL=gles
   export GDK_BACKEND GDK_GL
 fi
 

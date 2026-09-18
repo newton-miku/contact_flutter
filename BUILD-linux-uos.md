@@ -123,6 +123,9 @@ sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
 | `tool/build_deb.sh` | 图标改从 `packaging/linux/contact_flutter.png` 取；新增 `/usr/bin/contact_flutter` 软链 | 本分支没有 `android/`，原来只在 Android 的 `mipmap-*` 里找图标，必然找不到；应用装在 `/opt` 下而 `/opt` 不在 `PATH` 里，见「常见问题」第 7 条 |
 | `packaging/linux/contact_flutter.desktop` | `Exec` 由 `contact_flutter` 改成绝对路径 `/opt/contact_flutter/contact_flutter` | 同上，`Exec` 里的命令找不到时，桌面环境会直接把整个条目藏起来 |
 | `packaging/linux/contact_flutter.png` | 新增（256×256 应用图标） | 桌面条目 `Icon=contact_flutter` 的来源 |
+| `packaging/linux/contact_flutter.launcher` | 覆盖 `GDK_BACKEND=wayland` + `GDK_GL=gles` | 厂商 GL 栈只实现 GLES，GTK 默认走 X11 + 桌面版 GL，引擎拿不到 `GL_VERSION` 就 abort，见「常见问题」第 8 条 |
+| `assets/fonts/NotoSansSC-Regular.otf` + `pubspec.yaml` 的 `flutter.fonts` + `lib/main.dart` 的 `fontFamily` | 内置一份中文字体并设为默认字体 | **ARM64 Linux 的官方引擎没链接 Fontconfig**，取不到任何系统字体，中文全是方框，见「常见问题」第 9 条 |
+| `tool/build_deb.sh` | 校验 bundle 里有内置字体；把 OFL 许可证装到 `/usr/share/doc/` | 字体没进 bundle 就白搭；Noto 是 OFL 授权，再分发必须带许可证 |
 | 平台目录 | 只保留 `linux/` | 3.10 的 `isUsingGradle` 只看 `build.gradle`、**不认 `.kts`**，留着 Android 工程会被误判成 v1 嵌入 |
 | `.metadata` | 不再登记已删平台 | 免得 `flutter create/migrate` 去找不存在的平台 |
 
@@ -201,6 +204,79 @@ dpkg -L contact-flutter | grep desktop          # 条目到底装上没有
 cat /usr/share/applications/contact_flutter.desktop | grep '^Exec='
 /opt/contact_flutter/contact_flutter            # 直接跑，看是不是程序自身起不来
 ```
+
+### 8. `已放弃` + `Check failed: gl_version_string`
+
+```
+[FATAL:flutter/shell/gpu/gpu_surface_gl_delegate.cc(57)]
+Check failed: gl_version_string. The GL proc resolver's glGetString(GL_VERSION) failed
+已放弃 (core dumped)
+```
+
+Flutter 的 Linux 嵌入层取 GL 函数指针是**写死走 EGL**的（引擎源码 `fl_renderer.cc` 里
+就是一句 `eglGetProcAddress(name)`，没有 GLX 分支）。所以只要「建上下文的 EGL」和
+「解析函数指针的 EGL」不是同一份实现，`glGetString(GL_VERSION)` 就会返回 NULL，引擎
+直接 abort。
+
+国产机器上通常有两套 GL 栈叠在一起（本机实测：海思 `libGFX_hisi.so` 把 `libEGL` /
+`libGLESv2` / `libwayland-egl` / `libgbm` 全都接管了，同时 Mesa 也在），于是这条路上
+很容易踩中。实测矩阵（同一份二进制）：
+
+| GDK_BACKEND | GDK_GL | 结果 |
+|---|---|---|
+| 默认（本机是 `x11`） | 默认 | abort |
+| `x11` | `gles` | abort |
+| 默认 | `gles` | abort |
+| `wayland` | `gles` | **可用** |
+
+启动器已经**覆盖**这两个变量（注意是覆盖不是默认——DDE 会话本身就导出了
+`GDK_BACKEND=x11`，用 `${VAR:=...}` 会被它挡住）。想让 GTK 自己决定：
+
+```bash
+CONTACT_FLUTTER_KEEP_GDK=1 contact_flutter
+```
+
+排查时可以这样看 GDK 到底选了什么：
+
+```bash
+echo "GDK_BACKEND=$GDK_BACKEND GDK_GL=$GDK_GL WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+timeout 8 env GDK_BACKEND=wayland GDK_GL=gles /opt/contact_flutter/contact_flutter.bin; echo "rc=$?"
+# rc=124 表示活满 8 秒（正常）；134 表示又 abort 了
+```
+
+### 9. 中文全是方框（口口口）
+
+**这是 ARM64 Linux 上 Flutter 的已知问题，跟系统字体没关系。** 旧版官方
+`libflutter_linux_gtk.so`（3.50.0 之前）**没有链接 Fontconfig**，引擎取不到任何系统
+字体；因为没有字体，连数字和拉丁字母也会一起变成方框。
+
+自己确认一下：
+
+```bash
+readelf -d /opt/contact_flutter/lib/libflutter_linux_gtk.so | grep -i fontconfig
+# 没有任何输出 = 引擎确实没链接 Fontconfig
+```
+
+系统字体再多也没用（本机 `fc-list` 有 349 个字体、73 个带中文、`fc-match sans-serif`
+也正常，照样全是方框），因为引擎根本没去问 Fontconfig。
+
+官方修复（[flutter/flutter#180235](https://github.com/flutter/flutter/pull/180235)）
+要等 3.50.0，而 UOS 20 的 glibc 2.28 把这条线锁在 3.10.x，**等不到**。唯一可行的办法是
+**App 自带字体**：资产字体由 Skia 直接加载，不经过 Fontconfig。
+
+本快照已经这么做了：`assets/fonts/NotoSansSC-Regular.otf`（Noto Sans SC，OFL 授权，
+约 8MB）在 `pubspec.yaml` 里注册为 `ContactCJK`，`lib/main.dart` 的两个 `ThemeData`
+都设了 `fontFamily` / `fontFamilyFallback`。这也是 deb 体积涨到 15MB 左右的原因。
+
+自查字体有没有真的进包：
+
+```bash
+ls -l /opt/contact_flutter/data/flutter_assets/assets/fonts/
+dpkg -L contact-flutter | grep -i doc        # OFL 许可证
+```
+
+需要注意的副作用：Flutter 会给没有粗体字面的家族做**合成粗体**，所以我们只随包发了一个
+字重。要真粗体就得再塞一份 Bold（再加 8MB），目前不值当。
 
 ---
 

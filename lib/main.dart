@@ -22,6 +22,10 @@ class ContactsApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
+        // ARM64 Linux 的官方 Flutter 引擎（< 3.50.0）没有链接 Fontconfig，取不到任何系统
+        // 字体，所有文字都会画成方框。资产字体由 Skia 直接加载，不经 Fontconfig。
+        fontFamily: 'ContactCJK',
+        fontFamilyFallback: const ['ContactCJK'],
         cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
@@ -46,6 +50,9 @@ class ContactsApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
+        // 同 light：随包分发的中文字体。
+        fontFamily: 'ContactCJK',
+        fontFamilyFallback: const ['ContactCJK'],
         cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
