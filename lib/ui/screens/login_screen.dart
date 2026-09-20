@@ -46,6 +46,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             token: result.token,
             username: result.username,
             displayName: result.displayName,
+            // 首次登录 / 被重置密码：AppRoot 据此把人拦在改密页，不放行主界面。
+            mustChangePassword: result.mustChangePassword,
           );
       await ref.read(contactsProvider.notifier).load();
     } on ApiException catch (e) {

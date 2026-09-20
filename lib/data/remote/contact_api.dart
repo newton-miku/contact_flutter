@@ -240,6 +240,16 @@ class ContactApi {
     });
   }
 
+  /// 复检「首次登录强制改密」标记（`GET /api/auth/me`）。
+  ///
+  /// 桌面端冷启动拿本地令牌直接进主界面、不会再走登录接口，本地那份标记只是
+  /// 登录时的快照：用户可能在网页端改过密码（服务端已清零），也可能刚被管理员
+  /// 重置（服务端又置 1）。冷启动时以此对齐一次，只取需要的这一位。
+  Future<bool> fetchMustChangePassword() async {
+    final json = await _getJson('/api/auth/me');
+    return json['mustChangePassword'] == true;
+  }
+
   /// 查询当前数据版本（超小负载，客户端据此决定是否拉全量）。
   Future<ServerVersion> fetchVersion() async {
     return ServerVersion.fromJson(await _getJson('/api/version'));

@@ -26,6 +26,7 @@ import '../widgets/search_bar.dart';
 import 'about_screen.dart';
 import 'app_lock_settings_screen.dart';
 import 'caller_id_settings_screen.dart';
+import 'password_change_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -507,74 +508,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// 桌面端：修改当前账号密码。
+  ///
+  /// 复用「首次登录强制改密」那一页（`forced: false` = 可返回的自愿改密），
+  /// 免得同一套表单在校验和错误提示上出现两份实现。
   Future<void> _changePassword(BuildContext context) async {
-    final oldCtl = TextEditingController();
-    final newCtl = TextEditingController();
-    final againCtl = TextEditingController();
-    String? err;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          title: const Text('修改密码'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: oldCtl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: '当前密码'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: newCtl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: '新密码（至少 6 位）'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: againCtl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: '再次输入新密码'),
-              ),
-              if (err != null) ...[
-                const SizedBox(height: 10),
-                Text(err!,
-                    style: TextStyle(
-                        color: Theme.of(ctx).colorScheme.error, fontSize: 12)),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(
-              onPressed: () {
-                if (newCtl.text.length < 6) {
-                  setD(() => err = '新密码至少 6 位');
-                  return;
-                }
-                if (newCtl.text != againCtl.text) {
-                  setD(() => err = '两次输入不一致');
-                  return;
-                }
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        ),
-      ),
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const PasswordChangeScreen()),
     );
-    if (ok != true) return;
-    try {
-      await ref.read(contactApiProvider).changePassword(
-            oldPassword: oldCtl.text,
-            newPassword: newCtl.text,
-          );
-      if (mounted) _toast('密码已修改');
-    } catch (e) {
-      if (mounted) _toast('修改失败：$e');
-    }
+    if (ok == true && mounted) _toast('密码已修改');
   }
 
   /// 桌面端：退出登录（清除本地令牌，回到登录页）。

@@ -12,6 +12,7 @@ class DeviceAuthState {
     this.phone,
     this.username,
     this.displayName,
+    this.mustChangePassword = false,
   });
 
   /// 本地是否已读取完成（读取前不渲染主界面）。
@@ -27,6 +28,10 @@ class DeviceAuthState {
 
   final String? displayName;
 
+  /// 账号还在用初始/被重置的密码（服务端 `must_change_password`）：
+  /// 桌面端未改密前不放行主界面，与 Web 管理页行为一致。
+  final bool mustChangePassword;
+
   bool get activated => (token ?? '').isNotEmpty;
 
   DeviceAuthState copyWith({
@@ -35,6 +40,7 @@ class DeviceAuthState {
     String? phone,
     String? username,
     String? displayName,
+    bool? mustChangePassword,
   }) =>
       DeviceAuthState(
         ready: ready ?? this.ready,
@@ -42,16 +48,18 @@ class DeviceAuthState {
         phone: phone ?? this.phone,
         username: username ?? this.username,
         displayName: displayName ?? this.displayName,
+        mustChangePassword: mustChangePassword ?? this.mustChangePassword,
       );
 }
 
 class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
   /// [loadPersistence] 为 false 时跳过本地读取（测试 override 用）；
-  /// 可用 [initialToken]/[initialPhone] 直接构造“已激活”状态。
+  /// 可用 [initialToken]/[initialPhone]/[initialMustChangePassword] 直接构造状态。
   DeviceAuthNotifier({
     bool loadPersistence = true,
     String? initialToken,
     String? initialPhone,
+    bool initialMustChangePassword = false,
   }) : super(const DeviceAuthState()) {
     if (loadPersistence) {
       _hydrate();
@@ -60,6 +68,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
         ready: true,
         token: initialToken,
         phone: initialPhone,
+        mustChangePassword: initialMustChangePassword,
       );
     }
   }
@@ -68,6 +77,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
   static const _kPhone = 'device_phone';
   static const _kUsername = 'device_username';
   static const _kName = 'device_name';
+  static const _kMustChange = 'device_must_change_password';
 
   Future<void> _hydrate() async {
     try {
@@ -78,6 +88,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
         phone: p.getString(_kPhone),
         username: p.getString(_kUsername),
         displayName: p.getString(_kName),
+        mustChangePassword: p.getBool(_kMustChange) ?? false,
       );
     } catch (_) {
       state = const DeviceAuthState(ready: true);
@@ -90,6 +101,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
     String? phone,
     String? username,
     String? displayName,
+    bool mustChangePassword = false,
   }) async {
     state = DeviceAuthState(
       ready: true,
@@ -97,6 +109,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
       phone: phone,
       username: username,
       displayName: displayName,
+      mustChangePassword: mustChangePassword,
     );
     try {
       final p = await SharedPreferences.getInstance();
@@ -116,6 +129,21 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
       } else {
         await p.remove(_kName);
       }
+      await p.setBool(_kMustChange, mustChangePassword);
+    } catch (_) {}
+  }
+
+  /// 更新「首次登录强制改密」标记：改密成功后置 false；
+  /// 桌面端冷启动按服务端 `/api/auth/me` 复检时也用这个对齐。
+  ///
+  /// 必须落盘：桌面端冷启动是用本地令牌直接进主界面的，不重新登录，
+  /// 只存在内存里的话重启一次就把拦截绕过去了。
+  Future<void> setMustChangePassword(bool value) async {
+    if (state.mustChangePassword == value) return;
+    state = state.copyWith(mustChangePassword: value);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_kMustChange, value);
     } catch (_) {}
   }
 
@@ -128,6 +156,7 @@ class DeviceAuthNotifier extends StateNotifier<DeviceAuthState> {
       await p.remove(_kPhone);
       await p.remove(_kUsername);
       await p.remove(_kName);
+      await p.remove(_kMustChange);
     } catch (_) {}
   }
 }
